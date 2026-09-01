@@ -1,8 +1,22 @@
 # xwayland-satellite-dnd-fix
 
-Local Arch package for Steven's niri/Xwayland setup. It is pinned to upstream
-commit `6d0de1cedde9dc02abb8877d1b04b90a8c22c3d0` (five commits after v0.8.2), so
-upstream changes cannot silently alter a rebuild.
+This is a VCS package: every normal rebuild retrieves the current upstream
+`main` branch, derives a version with `pkgver()`, and then applies the local
+XDND/clipboard patch. It intentionally fails during `prepare()` if upstream
+changes make the patch incompatible; that is safer than silently installing an
+unreviewed merge.
+
+Update an installed copy with:
+
+```sh
+git pull --ff-only
+paru -Bi xwayland-satellite-dnd-fix
+# or: yay -Bi xwayland-satellite-dnd-fix
+```
+
+Local Arch package for Steven's niri/Xwayland setup. It follows upstream
+`main`; the local patch is deliberately reapplied on every rebuild, so upstream
+changes cannot silently bypass or alter the DND fix.
 
 ## Fixes included
 
@@ -30,12 +44,12 @@ lifecycle and is not claimed by this package.
 ```sh
 cd /home/steven/aur/xwayland-satellite-dnd-fix
 makepkg --cleanbuild --clean --force
-sudo pacman -U ./xwayland-satellite-dnd-fix-0.8.2.r5.g6d0de1c-2-x86_64.pkg.tar.zst
+sudo pacman -U ./*.pkg.tar.zst
 ```
 
 Installing conflicts with and replaces the installed package only for this
-transaction; the package declares `provides=('xwayland-satellite=0.8.2')` and
-does not use `replaces`.
+transaction; the package declares `provides=('xwayland-satellite')` and does
+not use `replaces`.
 
 Log out and back in after installation so niri starts the new satellite. Then:
 
