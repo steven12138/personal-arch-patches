@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Niri DMS Extreme Power Policy
+Comment=Synchronize niri display settings with the active TLP profile
+TryExec=/usr/bin/niri-power-refresh
+Exec=/usr/bin/niri-power-refresh
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

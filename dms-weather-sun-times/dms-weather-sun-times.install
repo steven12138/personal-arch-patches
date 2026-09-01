@@ -1,0 +1,23 @@
+run_patch_manager() {
+    if ! /usr/lib/dms-weather-sun-times/apply --apply; then
+        echo "dms-weather-sun-times: WARNING: patch needs manual review"
+    fi
+}
+
+post_install() {
+    run_patch_manager
+}
+
+pre_upgrade() {
+    if ! /usr/lib/dms-weather-sun-times/apply --remove; then
+        echo "dms-weather-sun-times: WARNING: could not remove the previous patch before upgrade"
+    fi
+}
+
+post_upgrade() {
+    run_patch_manager
+}
+
+pre_remove() {
+    /usr/lib/dms-weather-sun-times/apply --remove || true
+}

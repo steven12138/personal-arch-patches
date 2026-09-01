@@ -1,0 +1,61 @@
+# Maintainer: Steven <steven@localhost>
+
+pkgname=dms-material-transition
+pkgver=1.0.0
+pkgrel=5
+pkgdesc="Short Material 3 startup transition for niri and DankMaterialShell"
+arch=('any')
+url="https://github.com/AvengeMedia/DankMaterialShell"
+license=('MIT')
+depends=(
+    'dms-shell>=1.5.3'
+    'jq'
+    'niri>=26.04'
+    'patch'
+    'quickshell'
+    'systemd'
+)
+optdepends=(
+    'niri-dms-extreme-power: select the first output mode from the active TLP profile'
+)
+install=dms-material-transition.install
+source=(
+    'shell.qml'
+    'dms-material-transition'
+    'dms-material-transition-configure'
+    'prepare-niri'
+    '20-dms-material-transition.conf'
+    '0001-greeter-material-exit.patch'
+    'dms-material-transition-patch-greeter'
+    'dms-material-transition.install'
+    'LICENSE'
+)
+sha256sums=('c446b3876283942394756c4681d944bc3bfbec8f7b2c93fd429a2edca1018cd1'
+            '51c4ba86aaef4be52f4f4b360e6030907c739011a7557c5087ffda28ea50959c'
+            'aff6d42618861007a9b6ee4094967c0e3279f91c03d56e5569362328c4ba36e1'
+            '14d218af32e5a081598a45443511a60318d4052e79e74de3c031b43525a00b2f'
+            '2d8fda5c00872362295121cdf7294262ea2456c6c200bd951a27da0ea17287c1'
+            '2aaf49353c6a254467fb4d7aaca65838e20428d82441a75a0d22c085fa08df69'
+            'dcf186ba2e3c24620c562050053f4eac342cf54f5bde6bc895dea73a703a5dc1'
+            '6570a8414ad8b21d2c8e32a15e8b94b52c2438d5ee90758382e53a3f3272d237'
+            '92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86')
+
+package() {
+    install -Dm644 "$srcdir/shell.qml" \
+        "$pkgdir/usr/share/quickshell/dms-material-transition/shell.qml"
+    install -Dm755 "$srcdir/dms-material-transition" \
+        "$pkgdir/usr/bin/dms-material-transition"
+    install -Dm755 "$srcdir/dms-material-transition-configure" \
+        "$pkgdir/usr/bin/dms-material-transition-configure"
+    install -Dm755 "$srcdir/prepare-niri" \
+        "$pkgdir/usr/lib/dms-material-transition/prepare-niri"
+    install -Dm644 "$srcdir/20-dms-material-transition.conf" \
+        "$pkgdir/usr/lib/systemd/user/niri.service.d/20-dms-material-transition.conf"
+
+    install -Dm644 "$srcdir/0001-greeter-material-exit.patch" \
+        "$pkgdir/usr/share/dms-material-transition/0001-greeter-material-exit.patch"
+    install -Dm755 "$srcdir/dms-material-transition-patch-greeter" \
+        "$pkgdir/usr/lib/dms-material-transition/patch-greeter"
+    install -Dm644 "$srcdir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

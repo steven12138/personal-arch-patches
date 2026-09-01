@@ -1,0 +1,14 @@
+pkgname=niri-session-env-fix
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Niri session launcher without systemd import-environment deprecation warning'
+arch=('any')
+license=('MIT')
+depends=('niri')
+provides=('niri-session-env-fix')
+source=('niri-session')
+sha256sums=('SKIP')
+
+package() {
+    install -Dm755 "$srcdir/niri-session" "$pkgdir/usr/local/bin/niri-session"
+}

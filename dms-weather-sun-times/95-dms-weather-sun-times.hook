@@ -1,0 +1,12 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = dms-shell
+
+[Action]
+Description = Reapplying DMS weather sky-time patch...
+When = PostTransaction
+Depends = dms-weather-sun-times
+Depends = patch
+Exec = /usr/lib/dms-weather-sun-times/apply --apply

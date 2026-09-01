@@ -1,0 +1,97 @@
+--- a/usr/share/quickshell/dms-greeter/Modules/Greetd/GreeterContent.qml
++++ b/usr/share/quickshell/dms-greeter/Modules/Greetd/GreeterContent.qml
+@@ -24,6 +24,8 @@ Item {
+ 
+     signal launchRequested
+ 
++    property bool materialSessionTransitionActive: false
++    property int materialSessionTransitionDelayMs: 460
+     property bool weatherInitialized: false
+     property bool awaitingExternalAuth: false
+     property bool pendingPasswordResponse: false
+@@ -1999,6 +2001,7 @@ Item {
+             }
+ 
+             GreeterState.unlocking = true;
++            materialSessionTransitionActive = true;
+             launchTimeout.restart();
+             if (GreetdSettings.rememberLastSession) {
+                 GreetdMemory.setLastSession(sessionPath, sessionDesktopId);
+@@ -2060,7 +2063,7 @@ Item {
+ 
+     Timer {
+         id: memoryFlushTimer
+-        interval: memoryFlushDelayMs
++        interval: Math.max(memoryFlushDelayMs, materialSessionTransitionDelayMs)
+         onTriggered: {
+             if (!pendingLaunchCommand)
+                 return;
+@@ -2114,6 +2117,69 @@ Item {
+         onTriggered: clearAuthFeedback()
+     }
+ 
++    Rectangle {
++        anchors.fill: parent
++        z: 10000
++        color: Theme.background
++        opacity: materialSessionTransitionActive ? 1 : 0
++        visible: materialSessionTransitionActive || opacity > 0
++
++        Behavior on opacity {
++            NumberAnimation {
++                duration: 360
++                easing.type: Easing.OutCubic
++            }
++        }
++
++        Item {
++            anchors.centerIn: parent
++            width: 132
++            height: 132
++            opacity: materialSessionTransitionActive ? 1 : 0
++            scale: materialSessionTransitionActive ? 1 : 0.72
++
++            Behavior on opacity {
++                NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
++            }
++
++            Behavior on scale {
++                NumberAnimation { duration: 420; easing.type: Easing.OutBack }
++            }
++
++            Rectangle {
++                width: 50
++                height: 76
++                radius: 25
++                color: Theme.secondary
++                anchors.centerIn: parent
++                anchors.horizontalCenterOffset: -27
++                anchors.verticalCenterOffset: -8
++                rotation: -38
++            }
++
++            Rectangle {
++                width: 50
++                height: 76
++                radius: 25
++                color: Theme.primary
++                anchors.centerIn: parent
++                anchors.horizontalCenterOffset: 27
++                anchors.verticalCenterOffset: -8
++                rotation: 38
++            }
++
++            Rectangle {
++                width: 62
++                height: 62
++                radius: 22
++                color: Theme.primaryContainer
++                anchors.centerIn: parent
++                anchors.verticalCenterOffset: 24
++                rotation: 45
++            }
++        }
++    }
++
+     LockPowerMenu {
+     }

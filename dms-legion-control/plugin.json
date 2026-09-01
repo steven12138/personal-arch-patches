@@ -1,0 +1,15 @@
+{
+  "id": "legionControl",
+  "name": "Legion Control",
+  "description": "Monitor Lenovo Legion sensors, charging and platform controls",
+  "version": "1.0.1",
+  "author": "Steven",
+  "icon": "sports_esports",
+  "type": "widget",
+  "capabilities": ["dankbar-widget", "control-center", "hardware-monitor"],
+  "component": "./LegionControl.qml",
+  "settings": "./LegionControlSettings.qml",
+  "requires_dms": ">=1.5.0",
+  "dependencies": ["legion-dmsctl", "legion_laptop"],
+  "permissions": ["settings_read", "settings_write", "process"]
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec qs -p /usr/share/quickshell/dms-material-transition

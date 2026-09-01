@@ -1,0 +1,41 @@
+--- a/usr/share/quickshell/dms/Modules/DankBar/DankBarWindow.qml
++++ b/usr/share/quickshell/dms/Modules/DankBar/DankBarWindow.qml
+@@ -126,6 +126,11 @@
+ 
+     readonly property var dBarLayer: LayerShell.fromEnv("DMS_DANKBAR_LAYER", barWindow.usesOverlayLayer ? WlrLayer.Overlay : WlrLayer.Top)
+ 
++    // The top layer is covered immediately by fullscreen windows in niri.
++    // When the bar is configured on the overlay layer, use DMS's existing
++    // slide transition to tuck it away while this screen is fullscreen.
++    readonly property bool hideForFullscreen: CompositorService.connectedFrameBlockedOnScreen(barWindow.screen)
++
+     property var blurRegion: null
+     property var _blurWidgetItems: []
+ 
+@@ -1010,6 +1015,9 @@
+         }
+ 
+         property bool reveal: {
++            if (barWindow.hideForFullscreen)
++                return false;
++
+             const inOverviewWithShow = CompositorService.isNiri && NiriService.inOverview && barWindow.effectiveOpenOnOverview;
+             if (inOverviewWithShow)
+                 return true;
+@@ -1110,14 +1118,14 @@
+ 
+                     Behavior on x {
+                         NumberAnimation {
+-                            duration: Theme.shortDuration
++                            duration: Math.max(Theme.shortDuration, 180)
+                             easing.type: Easing.OutCubic
+                         }
+                     }
+ 
+                     Behavior on y {
+                         NumberAnimation {
+-                            duration: Theme.shortDuration
++                            duration: Math.max(Theme.shortDuration, 180)
+                             easing.type: Easing.OutCubic
+                         }
+                     }

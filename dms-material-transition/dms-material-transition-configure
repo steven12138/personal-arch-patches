@@ -1,0 +1,93 @@
+#!/bin/sh
+
+set -eu
+
+mode=${1:---install}
+config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
+config="$config_home/niri/config.kdl"
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+backup_dir="$state_home/dms-material-transition/backups"
+spawn_line='spawn-at-startup "/usr/bin/dms-material-transition"'
+include_line='include optional=true "startup-transition.kdl"'
+
+usage() {
+    printf '%s\n' "Usage: $0 [--install|--remove|--check]" >&2
+    exit 2
+}
+
+[ -r "$config" ] || {
+    printf '%s\n' "dms-material-transition: niri config not found: $config" >&2
+    exit 1
+}
+
+has_spawn=0
+has_include=0
+grep -Fqx "$spawn_line" "$config" && has_spawn=1
+grep -Fqx "$include_line" "$config" && has_include=1
+
+case "$mode" in
+    --check)
+        [ "$has_spawn" -eq 1 ] && [ "$has_include" -eq 1 ]
+        /usr/lib/dms-material-transition/prepare-niri
+        niri validate -c "$config"
+        exit
+        ;;
+    --install)
+        [ "$has_spawn" -eq 0 ] || [ "$has_include" -eq 0 ] || {
+            /usr/lib/dms-material-transition/prepare-niri
+            niri validate -c "$config"
+            printf '%s\n' "dms-material-transition: niri integration is already installed"
+            exit
+        }
+        ;;
+    --remove)
+        ;;
+    *) usage ;;
+esac
+
+mkdir -p "$backup_dir"
+stamp=$(date +%Y%m%d-%H%M%S)
+backup="$backup_dir/config.kdl.$stamp"
+cp -p "$config" "$backup"
+
+temporary="$config.tmp.$$"
+trap 'test ! -e "$temporary" || rm -f "$temporary"' EXIT HUP INT TERM
+
+if [ "$mode" = --install ]; then
+    awk -v spawn="$spawn_line" '
+        $0 == "spawn-at-startup \"dms\" \"run\"" && !inserted {
+            print spawn
+            inserted = 1
+        }
+        { print }
+        END {
+            if (!inserted)
+                print spawn
+        }
+    ' "$config" >"$temporary"
+
+    if ! grep -Fqx "$include_line" "$temporary"; then
+        printf '\n%s\n' "$include_line" >>"$temporary"
+    fi
+else
+    awk -v spawn="$spawn_line" -v include_marker="$include_line" '
+        $0 == spawn || $0 == include_marker { next }
+        { print }
+    ' "$config" >"$temporary"
+fi
+
+mv -f "$temporary" "$config"
+trap - EXIT HUP INT TERM
+
+if [ "$mode" = --install ]; then
+    /usr/lib/dms-material-transition/prepare-niri
+fi
+
+if ! niri validate -c "$config"; then
+    cp -p "$backup" "$config"
+    printf '%s\n' "dms-material-transition: validation failed; restored $backup" >&2
+    exit 1
+fi
+
+printf '%s\n' "dms-material-transition: updated $config"
+printf '%s\n' "dms-material-transition: backup saved at $backup"

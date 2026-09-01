@@ -1,0 +1,20 @@
+reload_user_manager() {
+    systemctl --global daemon-reload >/dev/null 2>&1 || true
+}
+
+post_install() {
+    reload_user_manager
+    /usr/lib/dms-material-transition/patch-greeter --remove || true
+    echo "dms-material-transition: run dms-material-transition-configure --install as the desktop user"
+    echo "dms-material-transition: log out once to verify the complete greeter-to-DMS transition"
+}
+
+post_upgrade() {
+    reload_user_manager
+    /usr/lib/dms-material-transition/patch-greeter --remove || true
+}
+
+post_remove() {
+    reload_user_manager
+    echo "dms-material-transition: run dms-material-transition-configure --remove as the desktop user"
+}

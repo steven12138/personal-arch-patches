@@ -1,0 +1,1 @@
+SUBSYSTEM=="power_supply", ENV{POWER_SUPPLY_TYPE}=="Mains", ACTION=="change", RUN+="/usr/bin/systemctl --no-block restart niri-dms-extreme-power.service"

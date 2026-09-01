@@ -1,0 +1,21 @@
+{
+    "id": "spotlightTranslate",
+    "name": "Spotlight Translate",
+    "description": "Automatically translate Chinese to English and English to Simplified Chinese",
+    "version": "1.0.0",
+    "author": "Steven",
+    "icon": "translate",
+    "type": "launcher",
+    "capabilities": ["launcher"],
+    "component": "./SpotlightTranslate.qml",
+    "settings": "./SpotlightTranslateSettings.qml",
+    "trigger": ">",
+    "requires_dms": ">=1.4.0",
+    "dependencies": ["trans"],
+    "permissions": [
+        "settings_read",
+        "settings_write",
+        "process",
+        "network"
+    ]
+}

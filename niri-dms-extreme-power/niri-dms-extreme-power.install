@@ -1,0 +1,26 @@
+reload_managers() {
+    systemctl daemon-reload
+    udevadm control --reload >/dev/null 2>&1 || true
+}
+
+post_install() {
+    reload_managers
+    echo "niri-dms-extreme-power: enable with systemctl enable --now niri-dms-extreme-power.service"
+    echo "niri-dms-extreme-power: niri integration starts automatically at the next niri login"
+}
+
+post_upgrade() {
+    reload_managers
+    if systemctl is-enabled --quiet niri-dms-extreme-power.service; then
+        systemctl reenable niri-dms-extreme-power.service || true
+        systemctl restart niri-dms-extreme-power.service || true
+    fi
+}
+
+pre_remove() {
+    systemctl disable --now niri-dms-extreme-power.service >/dev/null 2>&1 || true
+}
+
+post_remove() {
+    reload_managers
+}

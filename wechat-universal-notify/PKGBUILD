@@ -1,0 +1,35 @@
+# Maintainer: Steven <steven@localhost>
+
+pkgname=wechat-universal-notify
+pkgver=1.1.1
+pkgrel=1
+pkgdesc="Native desktop notifications for WeChat Universal on Linux"
+arch=('x86_64')
+url="https://aur.archlinux.org/packages/wechat-universal-notify"
+license=('MIT')
+depends=('wechat-universal-bwrap' 'sqlcipher' 'libnotify' 'glib2')
+makedepends=('gcc' 'pkgconf')
+source=('main.cpp' 'wechat-universal-notify.service' 'LICENSE')
+sha256sums=('628a8b23b5c991c5a03737881334f37bf042b11316ba5cb96009a13da092e468'
+            'ac0d79ecfbedc21b45bd1d393a2c1864ea6bfa8af9d0d92dfae072f12e36b547'
+            '92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86')
+
+build() {
+    g++ $CPPFLAGS $CXXFLAGS -std=c++20 -Wall -Wextra -Wpedantic $LDFLAGS \
+        "$srcdir/main.cpp" \
+        -o "$srcdir/wechat-universal-notify" \
+        $(pkg-config --cflags --libs sqlcipher libnotify)
+}
+
+check() {
+    "$srcdir/wechat-universal-notify" --version | grep -Fx "wechat-universal-notify $pkgver"
+}
+
+package() {
+    install -Dm755 "$srcdir/wechat-universal-notify" \
+        "$pkgdir/usr/bin/wechat-universal-notify"
+    install -Dm644 "$srcdir/wechat-universal-notify.service" \
+        "$pkgdir/usr/lib/systemd/user/wechat-universal-notify.service"
+    install -Dm644 "$srcdir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

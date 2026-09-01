@@ -1,0 +1,11 @@
+--- a/usr/share/quickshell/dms/scripts/qt.sh
++++ b/usr/share/quickshell/dms/scripts/qt.sh
+@@ -41,7 +41,7 @@
+                 } >>"$config_file"
+             fi
+         else
+-            printf '[Appearance]\\ncustom_palette=true\\ncolor_scheme_path=%s\\n' "$color_scheme_path" >"$config_file"
++            printf '[Appearance]\ncustom_palette=true\ncolor_scheme_path=%s\n' "$color_scheme_path" >"$config_file"
+         fi
+     }
+

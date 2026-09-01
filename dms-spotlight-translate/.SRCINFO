@@ -1,0 +1,21 @@
+pkgbase = dms-spotlight-translate
+	pkgdesc = Automatic Chinese-English translation provider for DMS Spotlight
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/alcxyz/DankTranslate
+	arch = any
+	license = MIT
+	depends = dms-shell>=1.4.0
+	depends = translate-shell
+	source = plugin.json
+	source = SpotlightTranslate.qml
+	source = SpotlightTranslateSettings.qml
+	source = README.md
+	source = LICENSE
+	sha256sums = f677d58a93c2074146973ca5469e8a55ba8a114b6f985b9d33d70b7851fec11b
+	sha256sums = ef2eb872370546e28bd6e44d734bd0ea9f666cffab5812e4f8a08eda1a67196f
+	sha256sums = 29016251f3850168c4539a44be757af53e9e9684f88c3ac41adf9b01ab401f9a
+	sha256sums = c4b4da20f6b0c332dfc5451a925b1ba4cfdb3749f5edcda6297676d5c7946506
+	sha256sums = 45c620d1cb04d093f7378c915c92d25e738f00a7f9445cb10a249508d90b0929
+
+pkgname = dms-spotlight-translate

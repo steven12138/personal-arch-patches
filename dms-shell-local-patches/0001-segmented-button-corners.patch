@@ -1,0 +1,17 @@
+--- a/usr/share/quickshell/dms/Widgets/DankButtonGroup.qml
++++ b/usr/share/quickshell/dms/Widgets/DankButtonGroup.qml
+@@ -118,10 +118,10 @@
+             border.color: "transparent"
+             border.width: 0
+ 
+-            topLeftRadius: (visualFirst || selected) ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
+-            bottomLeftRadius: (visualFirst || selected) ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
+-            topRightRadius: (visualLast || selected) ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
+-            bottomRightRadius: (visualLast || selected) ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
++            topLeftRadius: visualFirst ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
++            bottomLeftRadius: visualFirst ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
++            topRightRadius: visualLast ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
++            bottomRightRadius: visualLast ? Theme.cornerRadius : Math.min(4, Theme.cornerRadius)
+ 
+             Behavior on width {
+                 enabled: root.userInteracted

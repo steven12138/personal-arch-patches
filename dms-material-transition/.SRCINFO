@@ -1,0 +1,35 @@
+pkgbase = dms-material-transition
+	pkgdesc = Short Material 3 startup transition for niri and DankMaterialShell
+	pkgver = 1.0.0
+	pkgrel = 5
+	url = https://github.com/AvengeMedia/DankMaterialShell
+	install = dms-material-transition.install
+	arch = any
+	license = MIT
+	depends = dms-shell>=1.5.3
+	depends = jq
+	depends = niri>=26.04
+	depends = patch
+	depends = quickshell
+	depends = systemd
+	optdepends = niri-dms-extreme-power: select the first output mode from the active TLP profile
+	source = shell.qml
+	source = dms-material-transition
+	source = dms-material-transition-configure
+	source = prepare-niri
+	source = 20-dms-material-transition.conf
+	source = 0001-greeter-material-exit.patch
+	source = dms-material-transition-patch-greeter
+	source = dms-material-transition.install
+	source = LICENSE
+	sha256sums = c446b3876283942394756c4681d944bc3bfbec8f7b2c93fd429a2edca1018cd1
+	sha256sums = 51c4ba86aaef4be52f4f4b360e6030907c739011a7557c5087ffda28ea50959c
+	sha256sums = aff6d42618861007a9b6ee4094967c0e3279f91c03d56e5569362328c4ba36e1
+	sha256sums = 14d218af32e5a081598a45443511a60318d4052e79e74de3c031b43525a00b2f
+	sha256sums = 2d8fda5c00872362295121cdf7294262ea2456c6c200bd951a27da0ea17287c1
+	sha256sums = 2aaf49353c6a254467fb4d7aaca65838e20428d82441a75a0d22c085fa08df69
+	sha256sums = dcf186ba2e3c24620c562050053f4eac342cf54f5bde6bc895dea73a703a5dc1
+	sha256sums = 6570a8414ad8b21d2c8e32a15e8b94b52c2438d5ee90758382e53a3f3272d237
+	sha256sums = 92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86
+
+pkgname = dms-material-transition

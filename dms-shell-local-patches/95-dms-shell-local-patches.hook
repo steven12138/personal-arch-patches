@@ -1,0 +1,13 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = dms-shell
+Target = niri
+
+[Action]
+Description = Reapplying local DankMaterialShell patches...
+When = PostTransaction
+Depends = dms-shell-local-patches
+Depends = patch
+Exec = /usr/lib/dms-shell-local-patches/apply --apply

@@ -1,0 +1,71 @@
+# Maintainer: Steven <steven@localhost>
+
+pkgname=dms-shell-local-patches
+pkgver=1.1.1
+pkgrel=13
+pkgdesc="Local persistent UI patches for DankMaterialShell and Niri"
+arch=('any')
+url="https://github.com/AvengeMedia/DankMaterialShell"
+license=('MIT')
+depends=('dms-shell>=1.5.3' 'niri' 'patch' 'qt6ct')
+install=dms-shell-local-patches.install
+source=(
+    'dms-shell-local-patches'
+    '95-dms-shell-local-patches.hook'
+    'dms-shell-local-patches.install'
+    '0001-segmented-button-corners.patch'
+    '0002-niri-fullscreen-bar-animation.patch'
+    '0003-lock-screen-select-all.patch'
+    '0004-lock-screen-selection-alignment.patch'
+    '0005-niri-session-import-environment.patch'
+    '0006-niri-session-qt-environment.patch'
+    '0007-qt-colors-xdg-data-path.patch'
+    '0008-qt-colors-config-newlines.patch'
+    '0009-niri-session-qt-environment-defaults.patch'
+    'README.md'
+    'LICENSE'
+)
+sha256sums=(
+            'e562762a7d5db4ce1527b70233a825214d4ef3fbf1e4a3b524c6ea191d56c0dc'
+            '6a21a5e157811f05fa0dccfa994e5a0736dd39b54dff98847da55c643d081b6f'
+            'd3f90b92437330dc1ed13ae8b5260a4ca195e3b43654cb12de6ecc4e02024330'
+            'a2ebab994a7a7bdb713d27e49bbfda92a9ad65c699cbdce3e440db7729d5508f'
+            '5dd34237b1ed1aca6ce26f3e4042e2865dc82b6d02852f1dfc61980fb68324d8'
+            '9fdcf73603c8edafe7c69cf22072f3b7b0c751e7066dc79802d36863804199da'
+            '4c06081c1a37832cbbb920236c322570e4f8e8bb501918450dbc311ad44cf691'
+            '6d54c7559138d29bb59e17ea14dce96e0bdf88876d811739e1bcb81ff10820f3'
+            '4488235792e350484ae724961199f94dcf1db5f23847bf1f98b704e1493fb2db'
+            '850bd629a17d2159872a7b741046eb3a9932250bbe0d4140006f6877685c6938'
+            '9842804b8e93ac040eabe74547e338e43e53a787840812a389ceacf9c62a46bc'
+            '50f6cd897db3956afd12d95e7bdd4a14d5ad1c4b4a83c86782ca4beb6cce5043'
+            'de07cde1deab128b08b9eac1a745ed64e91ba82e72b9c1d4893ef3d1563a17e2'
+            '92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86')
+
+package() {
+    install -Dm755 "$srcdir/dms-shell-local-patches" \
+        "$pkgdir/usr/lib/dms-shell-local-patches/apply"
+    install -Dm644 "$srcdir/95-dms-shell-local-patches.hook" \
+        "$pkgdir/usr/share/libalpm/hooks/95-dms-shell-local-patches.hook"
+    install -Dm644 "$srcdir/0001-segmented-button-corners.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0001-segmented-button-corners.patch"
+    install -Dm644 "$srcdir/0002-niri-fullscreen-bar-animation.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0002-niri-fullscreen-bar-animation.patch"
+    install -Dm644 "$srcdir/0003-lock-screen-select-all.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0003-lock-screen-select-all.patch"
+    install -Dm644 "$srcdir/0004-lock-screen-selection-alignment.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0004-lock-screen-selection-alignment.patch"
+    install -Dm644 "$srcdir/0005-niri-session-import-environment.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0005-niri-session-import-environment.patch"
+    install -Dm644 "$srcdir/0006-niri-session-qt-environment.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0006-niri-session-qt-environment.patch"
+    install -Dm644 "$srcdir/0007-qt-colors-xdg-data-path.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0007-qt-colors-xdg-data-path.patch"
+    install -Dm644 "$srcdir/0008-qt-colors-config-newlines.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0008-qt-colors-config-newlines.patch"
+    install -Dm644 "$srcdir/0009-niri-session-qt-environment-defaults.patch" \
+        "$pkgdir/usr/share/dms-shell-local-patches/0009-niri-session-qt-environment-defaults.patch"
+    install -Dm644 "$srcdir/README.md" \
+        "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 "$srcdir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

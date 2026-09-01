@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Safe status/control bridge for the DMS Legion Control plugin.
+set -euo pipefail
+
+LEGION=/sys/devices/platform/legion
+BAT=/sys/class/power_supply/BAT0
+
+read_file() { [[ -r "$1" ]] && tr -d '\n' <"$1" || printf ''; }
+number_or_null() { local value; value="$(read_file "$1")"; [[ "$value" =~ ^-?[0-9]+$ ]] && printf '%s' "$value" || printf 'null'; }
+bool_or_null() { local value; value="$(read_file "$1")"; [[ "$value" == 0 ]] && printf false || { [[ "$value" == 1 ]] && printf true || printf null; }; }
+json_string() { local value; value="$(read_file "$1")"; value=${value//\\/\\\\}; value=${value//\"/\\\"}; printf '"%s"' "$value"; }
+hwmon_file() { local name=$1; local file; for file in "$LEGION"/hwmon/hwmon*/"$name"; do [[ -e "$file" ]] && { printf '%s' "$file"; return; }; done; }
+
+status() {
+    local hwmon
+    hwmon="$(hwmon_file name)"
+    printf '{'
+    printf '"available":%s,' "$([[ -d "$LEGION" ]] && printf true || printf false)"
+    printf '"battery":{"status":'; json_string "$BAT/status"; printf ',"capacity":'; number_or_null "$BAT/capacity"; printf ',"powerW":'
+    awk '{ printf "%.2f", $1 / 1000000 }' "$BAT/power_now" 2>/dev/null || printf 'null'
+    printf ',"voltageV":'; awk '{ printf "%.3f", $1 / 1000000 }' "$BAT/voltage_now" 2>/dev/null || printf 'null'; printf '},'
+    printf '"profile":'; json_string /sys/firmware/acpi/platform_profile; printf ','
+    printf '"temps":{"cpuC":'; awk '{ printf "%.1f", $1 / 1000 }' "$(hwmon_file temp1_input)" 2>/dev/null || printf 'null'
+    printf ',"gpuC":'; awk '{ printf "%.1f", $1 / 1000 }' "$(hwmon_file temp2_input)" 2>/dev/null || printf 'null'
+    printf ',"icC":'; awk '{ printf "%.1f", $1 / 1000 }' "$(hwmon_file temp3_input)" 2>/dev/null || printf 'null'; printf '},'
+    printf '"fans":{"fan1Rpm":'; number_or_null "$(hwmon_file fan1_input)"; printf ',"fan1TargetRpm":'; number_or_null "$(hwmon_file fan1_target)"
+    printf ',"fan2Rpm":'; number_or_null "$(hwmon_file fan2_input)"; printf ',"fan2TargetRpm":'; number_or_null "$(hwmon_file fan2_target)"; printf '},'
+    printf '"controls":{"conservation":'; bool_or_null "$LEGION/battery_conservation"; printf ',"rapidCharge":'; bool_or_null "$LEGION/rapidcharge"
+    printf ',"igpuMode":'; number_or_null "$LEGION/igpumode"; printf ',"powerChargeMode":'; number_or_null "$LEGION/powerchargemode"
+    printf ',"yLogo":'; number_or_null "$LEGION/leds/platform::ylogo/brightness"; printf ',"ioPort":'; number_or_null "$LEGION/leds/platform::ioport/brightness"
+    printf ',"keyboard":'; number_or_null "$LEGION/leds/platform::kbd_backlight_1/brightness"; printf '}}\n'
+}
+
+write_value() {
+    local key=$1 value=$2 path=''
+    case "$key:$value" in
+        profile:low-power|profile:balanced|profile:performance|profile:custom) path=/sys/firmware/acpi/platform_profile ;;
+        conservation:0|conservation:1) path="$LEGION/battery_conservation" ;;
+        rapid-charge:0|rapid-charge:1) path="$LEGION/rapidcharge" ;;
+        y-logo:0|y-logo:1) path="$LEGION/leds/platform::ylogo/brightness" ;;
+        io-port:0|io-port:1|io-port:2) path="$LEGION/leds/platform::ioport/brightness" ;;
+        keyboard:0|keyboard:1|keyboard:2) path="$LEGION/leds/platform::kbd_backlight_1/brightness" ;;
+        igpu-mode:0|igpu-mode:1|igpu-mode:2|igpu-mode:3) path="$LEGION/igpumode" ;;
+        *) echo "Unsupported Legion control: $key=$value" >&2; exit 64 ;;
+    esac
+    [[ -e "$path" ]] || { echo "This laptop/driver does not expose $key" >&2; exit 69; }
+    printf '%s\n' "$value" >"$path"
+}
+
+case "${1:-}" in
+    status) status ;;
+    set) [[ $# == 3 ]] || { echo 'Usage: legion-dmsctl set KEY VALUE' >&2; exit 64; }; write_value "$2" "$3" ;;
+    *) echo 'Usage: legion-dmsctl {status|set KEY VALUE}' >&2; exit 64 ;;
+esac

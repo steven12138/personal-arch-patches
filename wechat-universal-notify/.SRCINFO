@@ -1,0 +1,21 @@
+pkgbase = wechat-universal-notify
+	pkgdesc = Native desktop notifications for WeChat Universal on Linux
+	pkgver = 1.1.1
+	pkgrel = 1
+	url = https://aur.archlinux.org/packages/wechat-universal-notify
+	arch = x86_64
+	license = MIT
+	makedepends = gcc
+	makedepends = pkgconf
+	depends = wechat-universal-bwrap
+	depends = sqlcipher
+	depends = libnotify
+	depends = glib2
+	source = main.cpp
+	source = wechat-universal-notify.service
+	source = LICENSE
+	sha256sums = 628a8b23b5c991c5a03737881334f37bf042b11316ba5cb96009a13da092e468
+	sha256sums = ac0d79ecfbedc21b45bd1d393a2c1864ea6bfa8af9d0d92dfae072f12e36b547
+	sha256sums = 92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86
+
+pkgname = wechat-universal-notify

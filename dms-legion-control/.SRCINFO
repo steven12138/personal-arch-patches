@@ -1,0 +1,25 @@
+pkgbase = dms-legion-control
+	pkgdesc = DMS widget for Lenovo Legion sensors and guarded platform controls
+	pkgver = 1.0.1
+	pkgrel = 1
+	url = https://github.com/johnfanv2/LenovoLegionLinux
+	arch = any
+	license = MIT
+	depends = dms-shell>=1.5.0
+	depends = polkit
+	depends = bash
+	optdepends = lenovo-legion-linux-dkms: exposes Legion EC controls
+	source = plugin.json
+	source = LegionControl.qml
+	source = LegionControlSettings.qml
+	source = legion-dmsctl
+	source = README.md
+	source = LICENSE
+	sha256sums = 6b183f4cb44aa342e1f6d9590c1180c6762afd495f3798ecf2b984194d4d5ae3
+	sha256sums = 4a76622903084c3d0abe97814756e64095299ae1d93808055464bafccec88b17
+	sha256sums = 193a61a9695b32d22a00f961a2cbfa00bac8ba83c0a5ca7b9db52031243ded0f
+	sha256sums = b9976c0088c355ba47f42cec04d8afc096512e5ff1521db9f74ddb70d9bee9c4
+	sha256sums = d28407f642d3c9c8e9c0244cbaa8fc6e427adb1a86e79187247113db76772d88
+	sha256sums = a79ae887ebaad33e05fc37b616553c688feccb1be177f8b5012d71af5f8af1cd
+
+pkgname = dms-legion-control

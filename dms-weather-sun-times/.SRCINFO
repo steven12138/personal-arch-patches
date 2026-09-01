@@ -1,0 +1,22 @@
+pkgbase = dms-weather-sun-times
+	pkgdesc = Toggleable sunrise/sunset timeline for the DMS weather sky chart
+	pkgver = 1.1.0
+	pkgrel = 2
+	url = https://github.com/AvengeMedia/DankMaterialShell
+	install = dms-weather-sun-times.install
+	arch = any
+	license = MIT
+	depends = dms-shell>=1.5.3
+	depends = patch
+	source = dms-weather-sun-times
+	source = 95-dms-weather-sun-times.hook
+	source = dms-weather-sun-times.install
+	source = 0001-weather-sky-times-and-settings.patch
+	source = LICENSE
+	sha256sums = ead387ca0efc2dcfc42c465fd8672c1c0e42c22483a74006c93305219e6f89de
+	sha256sums = 526ebcadd989bb7cab79624bc11fca64b050c54213b6434da0ea33e504dcf5aa
+	sha256sums = 8f3b0f21814edd225751b14e47d9be4030846becac6c14124e9bc0f5ce8549f7
+	sha256sums = 14683a15f3b8b5c1bdf9ff30ca2083e64a94b04493494f9703aae71f68d9457f
+	sha256sums = 92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86
+
+pkgname = dms-weather-sun-times

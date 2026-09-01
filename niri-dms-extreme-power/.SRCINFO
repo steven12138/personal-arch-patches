@@ -1,0 +1,47 @@
+pkgbase = niri-dms-extreme-power
+	pkgdesc = Machine-specific extreme TLP policy and niri/DMS power integration
+	pkgver = 1.1.1
+	pkgrel = 5
+	url = https://linrunner.de/tlp/
+	install = niri-dms-extreme-power.install
+	arch = any
+	license = MIT
+	depends = brightnessctl
+	depends = glib2
+	depends = kmod
+	depends = niri
+	depends = systemd
+	depends = tlp>=1.10
+	depends = tlp-pd>=1.10
+	depends = util-linux
+	optdepends = bluez: disable and restore Bluetooth with the active profile
+	optdepends = dms-shell: graphical PowerProfiles controls
+	optdepends = nvidia-utils: stop and restore nvidia-powerd with the active profile
+	backup = etc/niri-dms-extreme-power.conf
+	backup = etc/tlp.d/99-extreme-powersave.conf
+	source = 99-extreme-powersave.conf
+	source = niri-dms-extreme-power.conf
+	source = niri-power-refresh
+	source = niri-dms-power-system
+	source = prepare-niri-gpu
+	source = 30-extreme-power-gpu.conf
+	source = niri-dms-extreme-power.service
+	source = 99-niri-dms-extreme-power.rules
+	source = niri-dms-extreme-power.desktop
+	source = niri-dms-extreme-power.install
+	source = README.md
+	source = LICENSE
+	sha256sums = e075ecbf047e1a0f3e505275be38193aec439d31353480aa4827cdc7cf0d7985
+	sha256sums = ff06ca6838e71d6d97a17efa4e0a634055911f51fbf20c3b5b5d28ee07d8c29f
+	sha256sums = db3fd59dd1945578a67addfdddb56a566fc7faecfdb1b1ae7001a29fed4b7c68
+	sha256sums = 95b78abdc4282e5c2c1c20b9f40a89e3877ca2e33c01047052b9c91e8eb2963d
+	sha256sums = 26d00d2bfbb85535f0645aa6c4324c29c20ca1e94cea653231052b4314d91d30
+	sha256sums = 70715930661c3837bebee21a399e62af158495690ca5e553d13035af1631e7fa
+	sha256sums = 0ff5c3d974d58ffeaf3b171fa5a166273e19ee117687687fc7a677d4188b58c9
+	sha256sums = d0d0e4082c4484a4f1a367bba37b50fb1e5097a56cd51ec0a7c9ce6e9637fbfd
+	sha256sums = bf3f4b84d6e01593a2b901262ca5dc40a72c2207220f6de9b3346988f1d4d44a
+	sha256sums = 40cd3ae1ac991dd6b04703ee5c26f4af96f4b6da0ca7eb131b47ef5550e8669b
+	sha256sums = a983d92cb30d47ad8d66b3cf5e2e4ac97bd262282c2de4214812d8ffb8eaf736
+	sha256sums = 92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86
+
+pkgname = niri-dms-extreme-power

@@ -1,0 +1,1273 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 8c27f2d..1382393 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -229,6 +229,10 @@ pub fn main(mut data: impl RunData) -> Option<()> {
+         server_state.run();
+         display.flush_clients().unwrap();
+ 
++        for event in server_state.take_dnd_events() {
++            xstate.handle_wayland_dnd(event);
++        }
++
+         if let Some(sel) = server_state.new_selection::<Clipboard>() {
+             xstate.set_clipboard(sel);
+         }
+diff --git a/src/server/clientside.rs b/src/server/clientside.rs
+index 664c909..7819361 100644
+--- a/src/server/clientside.rs
++++ b/src/server/clientside.rs
+@@ -6,7 +6,7 @@ use smithay_client_toolkit::{
+     activation::{ActivationHandler, RequestData, RequestDataExt},
+     data_device_manager::{
+         data_device::{DataDeviceData, DataDeviceHandler},
+-        data_offer::{DataOfferHandler, SelectionOffer},
++        data_offer::{DataOfferHandler, DragOffer, SelectionOffer},
+         data_source::DataSourceHandler,
+     },
+     delegate_activation, delegate_data_device, delegate_primary_selection,
+@@ -94,6 +94,7 @@ use xcb::x;
+ 
+ pub(super) struct SelectionEvents<T> {
+     pub offer: Option<T>,
++    pub offer_changed: bool,
+     pub requests: Vec<(
+         String,
+         smithay_client_toolkit::data_device_manager::WritePipe,
+@@ -105,6 +106,7 @@ impl<T> Default for SelectionEvents<T> {
+     fn default() -> Self {
+         Self {
+             offer: None,
++            offer_changed: false,
+             requests: Default::default(),
+             cancelled: false,
+         }
+@@ -120,6 +122,7 @@ pub(super) struct MyWorld {
+     queued_events: Vec<mpsc::Receiver<(Entity, ObjectEvent)>>,
+     pub clipboard: SelectionEvents<SelectionOffer>,
+     pub primary: SelectionEvents<PrimarySelectionOffer>,
++    pub dnd: Vec<DndEvent>,
+     pub pending_activations: Vec<(xcb::x::Window, String)>,
+ }
+ 
+@@ -134,11 +137,28 @@ impl MyWorld {
+             queued_events: Vec::new(),
+             clipboard: Default::default(),
+             primary: Default::default(),
++            dnd: Vec::new(),
+             pending_activations: Vec::new(),
+         }
+     }
+ }
+ 
++#[derive(Debug, Clone)]
++pub(crate) enum DndEvent {
++    Enter {
++        offer: DragOffer,
++        surface: WlSurface,
++        x: f64,
++        y: f64,
++    },
++    Motion {
++        x: f64,
++        y: f64,
++    },
++    Leave,
++    Drop,
++}
++
+ impl std::ops::Deref for MyWorld {
+     type Target = World;
+     fn deref(&self) -> &Self::Target {
+@@ -446,6 +466,7 @@ impl DataDeviceHandler for MyWorld {
+     ) {
+         let data: &DataDeviceData = data_device.data().unwrap();
+         self.clipboard.offer = data.selection_offer();
++        self.clipboard.offer_changed = true;
+     }
+ 
+     fn drop_performed(
+@@ -454,6 +475,7 @@ impl DataDeviceHandler for MyWorld {
+         _: &wayland_client::QueueHandle<Self>,
+         _: &wayland_client::protocol::wl_data_device::WlDataDevice,
+     ) {
++        self.dnd.push(DndEvent::Drop);
+     }
+ 
+     fn motion(
+@@ -461,9 +483,10 @@ impl DataDeviceHandler for MyWorld {
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+         _: &wayland_client::protocol::wl_data_device::WlDataDevice,
+-        _: f64,
+-        _: f64,
++        x: f64,
++        y: f64,
+     ) {
++        self.dnd.push(DndEvent::Motion { x, y });
+     }
+ 
+     fn leave(
+@@ -472,17 +495,27 @@ impl DataDeviceHandler for MyWorld {
+         _: &wayland_client::QueueHandle<Self>,
+         _: &wayland_client::protocol::wl_data_device::WlDataDevice,
+     ) {
++        self.dnd.push(DndEvent::Leave);
+     }
+ 
+     fn enter(
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_device::WlDataDevice,
+-        _: f64,
+-        _: f64,
+-        _: &wayland_client::protocol::wl_surface::WlSurface,
++        data_device: &wayland_client::protocol::wl_data_device::WlDataDevice,
++        x: f64,
++        y: f64,
++        surface: &wayland_client::protocol::wl_surface::WlSurface,
+     ) {
++        let data: &DataDeviceData = data_device.data().unwrap();
++        if let Some(offer) = data.drag_offer() {
++            self.dnd.push(DndEvent::Enter {
++                offer,
++                surface: surface.clone(),
++                x,
++                y,
++            });
++        }
+     }
+ }
+ 
+@@ -611,6 +644,7 @@ impl PrimarySelectionDeviceHandler for MyWorld {
+         };
+ 
+         self.primary.offer = data.selection_offer();
++        self.primary.offer_changed = true;
+     }
+ }
+ 
+diff --git a/src/server/mod.rs b/src/server/mod.rs
+index 379df77..1817e33 100644
+--- a/src/server/mod.rs
++++ b/src/server/mod.rs
+@@ -11,14 +11,16 @@ use crate::xstate::{
+     Decorations, MoveResizeDirection, WindowDims, WindowRole, WmHints, WmName, WmNormalHints,
+ };
+ use crate::{X11Selection, XConnection, timespec_from_millis};
+-use clientside::MyWorld;
++use clientside::{DndEvent, MyWorld};
+ use decoration::{DecorationsData, DecorationsDataSatellite};
+ use hecs::Entity;
+ use log::{debug, error, warn};
+ use rustix::event::{PollFd, PollFlags, poll};
+ use rustix::fs::Timespec;
+ use smithay_client_toolkit::activation::ActivationState;
++use smithay_client_toolkit::data_device_manager::data_offer::DragOffer;
+ use std::collections::{HashMap, HashSet};
++use std::io::Read;
+ use std::ops::{Deref, DerefMut};
+ use std::os::fd::{AsFd, BorrowedFd};
+ use std::os::unix::net::UnixStream;
+@@ -444,6 +446,22 @@ pub struct ServerState<C: XConnection> {
+     inner: InnerServerState<C::X11Selection>,
+     pub connection: C,
+ }
++
++#[derive(Debug, Clone)]
++pub(crate) enum ResolvedDndEvent {
++    Enter {
++        offer: DragOffer,
++        window: x::Window,
++        x: f64,
++        y: f64,
++    },
++    Motion {
++        x: f64,
++        y: f64,
++    },
++    Leave,
++    Drop,
++}
+ impl<C: XConnection> Deref for ServerState<C> {
+     type Target = InnerServerState<C::X11Selection>;
+     fn deref(&self) -> &Self::Target {
+@@ -618,6 +636,57 @@ impl<S: X11Selection> ServerState<NoConnection<S>> {
+ }
+ 
+ impl<C: XConnection> ServerState<C> {
++    pub(crate) fn take_dnd_events(&mut self) -> Vec<ResolvedDndEvent> {
++        std::mem::take(&mut self.world.dnd)
++            .into_iter()
++            .filter_map(|event| match event {
++                DndEvent::Enter {
++                    offer,
++                    surface,
++                    x,
++                    y,
++                } => {
++                    let window = self.windows.iter().find_map(|(window, entity)| {
++                        self.world
++                            .get::<&client::wl_surface::WlSurface>(*entity)
++                            .ok()
++                            .filter(|candidate| **candidate == surface)
++                            .map(|_| *window)
++                    });
++                    match window {
++                        Some(window) => Some(ResolvedDndEvent::Enter {
++                            offer,
++                            window,
++                            x,
++                            y,
++                        }),
++                        None => {
++                            warn!("ignoring drag enter for an unknown Xwayland surface");
++                            None
++                        }
++                    }
++                }
++                DndEvent::Motion { x, y } => Some(ResolvedDndEvent::Motion { x, y }),
++                DndEvent::Leave => Some(ResolvedDndEvent::Leave),
++                DndEvent::Drop => Some(ResolvedDndEvent::Drop),
++            })
++            .collect()
++    }
++
++    pub(crate) fn receive_dnd_offer(&mut self, offer: &DragOffer, mime: String) -> Vec<u8> {
++        let Ok(mut pipe) = offer.receive(mime) else {
++            return Vec::new();
++        };
++        if self.queue.flush().is_err() {
++            return Vec::new();
++        }
++        let mut data = Vec::new();
++        if pipe.read_to_end(&mut data).is_err() {
++            return Vec::new();
++        }
++        data
++    }
++
+     pub fn run(&mut self) {
+         if let Some(r) = self.queue.prepare_read() {
+             let fd = r.connection_fd();
+diff --git a/src/server/selection.rs b/src/server/selection.rs
+index bd32aaa..bcd9a01 100644
+--- a/src/server/selection.rs
++++ b/src/server/selection.rs
+@@ -98,7 +98,8 @@ impl<S: X11Selection> InnerServerState<S> {
+             events.cancelled = false;
+         }
+ 
+-        if state.source.is_none() {
++        if events.offer_changed {
++            events.offer_changed = false;
+             if let Some(offer) = T::take_offer(&mut events.offer) {
+                 let mime_types = T::get_mimes(&offer);
+                 let foreign = ForeignSelection {
+@@ -106,6 +107,11 @@ impl<S: X11Selection> InnerServerState<S> {
+                     inner: offer,
+                 };
+                 state.source = Some(SelectionData::Foreign(foreign));
++            } else if matches!(state.source, Some(SelectionData::Foreign(_))) {
++                // A selection callback without an offer means the native
++                // Wayland selection was cleared.  Keep an X11-backed source:
++                // owners do not receive an offer for their own source.
++                state.source = None;
+             }
+         }
+     }
+@@ -131,6 +137,29 @@ impl<S: X11Selection> InnerServerState<S> {
+         }
+     }
+ 
++    /// Stop exporting an X11-owned selection to Wayland.
++    ///
++    /// XFixes reports owner destruction independently from the Wayland data-source
++    /// cancellation event.  Keeping the source alive after its X11 owner vanished
++    /// leaves a MIME-only clipboard whose reads return EOF, and it can mask the next
++    /// native Wayland selection.  Clear only sources which originated on X11; a
++    /// Wayland-owned selection must remain untouched.
++    pub(crate) fn clear_x11_selection_source<T: SelectionType>(&mut self) {
++        let Some(state) = T::selection_state(&mut self.selection_states) else {
++            return;
++        };
++        if !matches!(state.source, Some(SelectionData::X11 { .. })) {
++            return;
++        }
++
++        state.source = None;
++        if let (Some(device), Some((_, serial))) =
++            (state.device.as_ref(), self.last_kb_serial.as_ref())
++        {
++            T::unset_selection(device, *serial);
++        }
++    }
++
+     pub(crate) fn new_selection<T: SelectionType>(&mut self) -> Option<ForeignSelection<T>> {
+         T::selection_state(&mut self.selection_states)
+             .as_mut()
+@@ -187,6 +216,8 @@ pub trait SelectionType: Sized {
+ 
+     fn set_selection(source: &Self::Source, device: &Self::DataDevice, serial: u32);
+ 
++    fn unset_selection(device: &Self::DataDevice, serial: u32);
++
+     fn get_events(world: &mut MyWorld) -> &mut SelectionEvents<Self::Offer>;
+ 
+     fn receive_offer(offer: &Self::Offer, mime_type: String) -> std::io::Result<ReadPipe>;
+@@ -226,6 +257,10 @@ impl SelectionType for Clipboard {
+         source.set_selection(device, serial);
+     }
+ 
++    fn unset_selection(device: &Self::DataDevice, serial: u32) {
++        device.unset_selection(serial);
++    }
++
+     fn get_events(world: &mut MyWorld) -> &mut SelectionEvents<Self::Offer> {
+         &mut world.clipboard
+     }
+@@ -274,6 +309,10 @@ impl SelectionType for Primary {
+         source.set_selection(device, serial);
+     }
+ 
++    fn unset_selection(device: &Self::DataDevice, serial: u32) {
++        device.unset_selection(serial);
++    }
++
+     fn get_events(world: &mut MyWorld) -> &mut SelectionEvents<Self::Offer> {
+         &mut world.primary
+     }
+diff --git a/src/xstate/dnd.rs b/src/xstate/dnd.rs
+new file mode 100644
+index 0000000..37ee5a2
+--- /dev/null
++++ b/src/xstate/dnd.rs
+@@ -0,0 +1,488 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++//
++// Copy-only XDND bridge.  The state transitions follow the Xdnd v5 ordering
++// used by KWin's Xwayland data bridge, but this is an independent Rust
++// implementation for xwayland-satellite.
++
++use super::XState;
++use crate::server::{ResolvedDndEvent, ServerState};
++use crate::xstate::RealConnection;
++use log::{debug, warn};
++use smithay_client_toolkit::data_device_manager::data_offer::DragOffer;
++use wayland_client::protocol::wl_data_device_manager::DndAction;
++use xcb::{Xid, x};
++
++pub(super) const XDND_VERSION: u32 = 5;
++const URI_LIST: &str = "text/uri-list";
++
++#[derive(Debug)]
++struct ActiveDnd {
++    offer: DragOffer,
++    target: x::Window,
++    serial: u32,
++    version: u32,
++    mime_atom: x::Atom,
++    data: Option<Vec<u8>>,
++    accepted: bool,
++    position_pending: bool,
++    cached_position: Option<(f64, f64)>,
++    drop_requested: bool,
++    dropped: bool,
++}
++
++#[derive(Debug, Default)]
++pub(super) struct DndBridge {
++    active: Option<ActiveDnd>,
++}
++
++impl DndBridge {
++    pub(super) fn new() -> Self {
++        Self::default()
++    }
++
++    fn send_message(state: &XState, target: x::Window, ty: x::Atom, data: [u32; 5]) {
++        let event = x::ClientMessageEvent::new(target, ty, x::ClientMessageData::Data32(data));
++        if let Err(error) = state.connection.send_and_check_request(&x::SendEvent {
++            propagate: false,
++            destination: x::SendEventDest::Window(target),
++            event_mask: x::EventMask::empty(),
++            event: &event,
++        }) {
++            warn!("failed to send XDND event to {target:?}: {error:?}");
++        }
++    }
++
++    fn packed_coords(x: i16, y: i16) -> u32 {
++        (u32::from(x as u16) << 16) | u32::from(y as u16)
++    }
++
++    fn root_coords(state: &XState, target: x::Window, x: f64, y: f64) -> u32 {
++        let x = (x.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16) as u16;
++        let y = (y.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16) as u16;
++        let cookie = state.connection.send_request(&x::TranslateCoordinates {
++            src_window: target,
++            dst_window: state.root,
++            src_x: x as i16,
++            src_y: y as i16,
++        });
++        match state.connection.wait_for_reply(cookie) {
++            Ok(reply) => Self::packed_coords(reply.dst_x(), reply.dst_y()),
++            Err(error) => {
++                warn!("failed to translate XDND coordinates for {target:?}: {error:?}");
++                Self::packed_coords(x as i16, y as i16)
++            }
++        }
++    }
++
++    fn target_version(state: &XState, target: x::Window) -> Option<u32> {
++        let cookie = state.connection.send_request(&x::GetProperty {
++            delete: false,
++            window: target,
++            property: state.atoms.xdnd_aware,
++            r#type: x::ATOM_ATOM,
++            long_offset: 0,
++            long_length: 1,
++        });
++        state
++            .connection
++            .wait_for_reply(cookie)
++            .ok()?
++            .value::<u32>()
++            .first()
++            .copied()
++    }
++
++    fn release_selection(state: &XState) {
++        let owner = state
++            .connection
++            .wait_for_reply(state.connection.send_request(&x::GetSelectionOwner {
++                selection: state.atoms.xdnd_selection,
++            }))
++            .ok()
++            .map(|reply| reply.owner());
++        if owner != Some(state.wm_window) {
++            return;
++        }
++        let _ = state
++            .connection
++            .send_and_check_request(&x::SetSelectionOwner {
++                owner: x::Window::none(),
++                selection: state.atoms.xdnd_selection,
++                time: x::CURRENT_TIME,
++            });
++    }
++
++    fn claim_selection(state: &XState) -> bool {
++        if state
++            .connection
++            .send_and_check_request(&x::SetSelectionOwner {
++                owner: state.wm_window,
++                selection: state.atoms.xdnd_selection,
++                time: x::CURRENT_TIME,
++            })
++            .is_err()
++        {
++            return false;
++        }
++        state
++            .connection
++            .wait_for_reply(state.connection.send_request(&x::GetSelectionOwner {
++                selection: state.atoms.xdnd_selection,
++            }))
++            .is_ok_and(|reply| reply.owner() == state.wm_window)
++    }
++
++    fn clear_active(&mut self, state: &XState, send_leave: bool, finish: bool) {
++        let Some(active) = self.active.take() else {
++            return;
++        };
++        if send_leave && !active.dropped {
++            Self::send_message(
++                state,
++                active.target,
++                state.atoms.xdnd_leave,
++                [state.wm_window.resource_id(), 0, 0, 0, 0],
++            );
++        }
++        if finish {
++            active.offer.finish();
++        } else if !active.drop_requested {
++            active.offer.accept_mime_type(active.serial, None);
++        }
++        // SCTK destroys an offer before delivering leave when no Wayland drop
++        // occurred.  A dropped offer is deliberately retained by SCTK and is
++        // ours to destroy after the X target finishes or aborts.
++        if active.drop_requested {
++            active.offer.destroy();
++        }
++        Self::release_selection(state);
++    }
++
++    fn leave(&mut self, state: &XState) {
++        if self
++            .active
++            .as_ref()
++            .is_some_and(|active| active.drop_requested)
++        {
++            // A dropped Wayland offer remains valid until the X target sends
++            // XdndFinished and may still be asked for selection data.
++            return;
++        }
++        self.clear_active(state, true, false);
++    }
++
++    fn enter(&mut self, state: &XState, offer: DragOffer, target: x::Window, x: f64, y: f64) {
++        self.clear_active(state, true, false);
++
++        let has_uri_list = offer.with_mime_types(|mimes| mimes.iter().any(|m| m == URI_LIST));
++        if !has_uri_list {
++            debug!("rejecting non-file Wayland drag for X11 target {target:?}");
++            offer.accept_mime_type(offer.serial, None);
++            return;
++        }
++
++        let Some(target_version) = Self::target_version(state, target) else {
++            debug!("rejecting drag for XDND-unaware X11 target {target:?}");
++            offer.accept_mime_type(offer.serial, None);
++            return;
++        };
++        let version = target_version.min(XDND_VERSION);
++        if version < 2 {
++            debug!("rejecting unsupported XDND v{version} target {target:?}");
++            offer.accept_mime_type(offer.serial, None);
++            return;
++        }
++
++        offer.set_actions(DndAction::Copy, DndAction::Copy);
++        offer.accept_mime_type(offer.serial, Some(URI_LIST.to_string()));
++        let mime_atom = state
++            .connection
++            .wait_for_reply(state.connection.send_request(&x::InternAtom {
++                only_if_exists: false,
++                name: URI_LIST.as_bytes(),
++            }))
++            .expect("failed to intern text/uri-list")
++            .atom();
++
++        if !Self::claim_selection(state) {
++            offer.accept_mime_type(offer.serial, None);
++            return;
++        }
++
++        Self::send_message(
++            state,
++            target,
++            state.atoms.xdnd_enter,
++            [
++                state.wm_window.resource_id(),
++                version << 24,
++                mime_atom.resource_id(),
++                0,
++                0,
++            ],
++        );
++        self.active = Some(ActiveDnd {
++            serial: offer.serial,
++            offer,
++            target,
++            version,
++            mime_atom,
++            data: None,
++            accepted: false,
++            position_pending: false,
++            cached_position: None,
++            drop_requested: false,
++            dropped: false,
++        });
++        self.motion(state, x, y);
++    }
++
++    fn send_position(&mut self, state: &XState, x: f64, y: f64) {
++        let Some(active) = self.active.as_mut() else {
++            return;
++        };
++        if active.position_pending {
++            active.cached_position = Some((x, y));
++            return;
++        }
++        Self::send_message(
++            state,
++            active.target,
++            state.atoms.xdnd_position,
++            [
++                state.wm_window.resource_id(),
++                0,
++                Self::root_coords(state, active.target, x, y),
++                0,
++                state.atoms.xdnd_action_copy.resource_id(),
++            ],
++        );
++        active.position_pending = true;
++    }
++
++    fn motion(&mut self, state: &XState, x: f64, y: f64) {
++        if self
++            .active
++            .as_ref()
++            .is_some_and(|active| active.drop_requested)
++        {
++            return;
++        }
++        self.send_position(state, x, y);
++    }
++
++    fn perform_drop(&mut self, state: &XState) {
++        let Some(active) = self.active.as_mut() else {
++            return;
++        };
++        if active.position_pending || active.dropped {
++            return;
++        }
++        if !active.accepted {
++            self.clear_active(state, true, false);
++            return;
++        }
++        active.dropped = true;
++        Self::send_message(
++            state,
++            active.target,
++            state.atoms.xdnd_drop,
++            [state.wm_window.resource_id(), 0, 0, 0, 0],
++        );
++    }
++
++    fn drop(&mut self, state: &XState) {
++        let Some(active) = self.active.as_mut() else {
++            return;
++        };
++        active.drop_requested = true;
++        self.perform_drop(state);
++    }
++
++    fn selection_request(
++        &mut self,
++        state: &XState,
++        event: &x::SelectionRequestEvent,
++        server: &mut ServerState<RealConnection>,
++    ) -> bool {
++        if event.selection() != state.atoms.xdnd_selection {
++            return false;
++        }
++
++        if event.owner() != state.wm_window {
++            return false;
++        }
++
++        let property = if event.property() == x::ATOM_NONE {
++            event.target()
++        } else {
++            event.property()
++        };
++        let mut success = false;
++        if let Some(active) = self.active.as_mut() {
++            if event.target() == state.atoms.targets {
++                success = state
++                    .connection
++                    .send_and_check_request(&x::ChangeProperty {
++                        mode: x::PropMode::Replace,
++                        window: event.requestor(),
++                        property,
++                        r#type: x::ATOM_ATOM,
++                        data: &[state.atoms.targets, state.atoms.timestamp, active.mime_atom],
++                    })
++                    .is_ok();
++            } else if event.target() == state.atoms.timestamp {
++                success = state
++                    .connection
++                    .send_and_check_request(&x::ChangeProperty {
++                        mode: x::PropMode::Replace,
++                        window: event.requestor(),
++                        property,
++                        r#type: x::ATOM_INTEGER,
++                        data: &[x::CURRENT_TIME],
++                    })
++                    .is_ok();
++            } else if event.target() == active.mime_atom {
++                if active.data.is_none() {
++                    active.data =
++                        Some(server.receive_dnd_offer(&active.offer, URI_LIST.to_string()));
++                }
++                let data = active.data.as_deref().unwrap_or_default();
++                success = !data.is_empty()
++                    && state
++                        .connection
++                        .send_and_check_request(&x::ChangeProperty {
++                            mode: x::PropMode::Replace,
++                            window: event.requestor(),
++                            property,
++                            r#type: active.mime_atom,
++                            data,
++                        })
++                        .is_ok();
++            }
++        }
++
++        let notify = x::SelectionNotifyEvent::new(
++            event.time(),
++            event.requestor(),
++            event.selection(),
++            event.target(),
++            if success { property } else { x::ATOM_NONE },
++        );
++        let _ = state.connection.send_and_check_request(&x::SendEvent {
++            propagate: false,
++            destination: x::SendEventDest::Window(event.requestor()),
++            event_mask: x::EventMask::empty(),
++            event: &notify,
++        });
++        true
++    }
++
++    fn client_message(&mut self, state: &XState, event: &x::ClientMessageEvent) -> bool {
++        let x::ClientMessageData::Data32(data) = event.data() else {
++            return false;
++        };
++        if event.r#type() == state.atoms.xdnd_status {
++            let Some(active) = self.active.as_mut() else {
++                return true;
++            };
++            if data[0] != active.target.resource_id() {
++                return false;
++            }
++            active.position_pending = false;
++            active.accepted =
++                data[1] & 1 != 0 && data[4] == state.atoms.xdnd_action_copy.resource_id();
++            if active.accepted {
++                active.offer.set_actions(DndAction::Copy, DndAction::Copy);
++                active
++                    .offer
++                    .accept_mime_type(active.serial, Some(URI_LIST.to_string()));
++            } else {
++                active.offer.accept_mime_type(active.serial, None);
++            }
++            let cached_position = active.cached_position.take();
++            let drop_requested = active.drop_requested;
++            if let Some((x, y)) = cached_position {
++                self.send_position(state, x, y);
++            } else if drop_requested {
++                self.perform_drop(state);
++            }
++            return true;
++        }
++        if event.r#type() == state.atoms.xdnd_finished {
++            let Some(active) = self.active.as_ref() else {
++                return true;
++            };
++            if data[0] != active.target.resource_id() {
++                return false;
++            }
++            let success = active.dropped && (active.version < 5 || data[1] & 1 != 0);
++            self.clear_active(state, false, success);
++            return true;
++        }
++        false
++    }
++
++    fn handle_xevent(
++        &mut self,
++        state: &XState,
++        event: &xcb::Event,
++        server: &mut ServerState<RealConnection>,
++    ) -> bool {
++        match event {
++            xcb::Event::X(x::Event::SelectionRequest(event)) => {
++                self.selection_request(state, event, server)
++            }
++            xcb::Event::X(x::Event::ClientMessage(event)) => self.client_message(state, event),
++            xcb::Event::X(x::Event::SelectionClear(event))
++                if event.selection() == state.atoms.xdnd_selection =>
++            {
++                if let Some(active) = self.active.take() {
++                    if active.drop_requested {
++                        active.offer.destroy();
++                    }
++                }
++                true
++            }
++            xcb::Event::X(x::Event::DestroyNotify(event))
++                if self
++                    .active
++                    .as_ref()
++                    .is_some_and(|active| active.target == event.window()) =>
++            {
++                self.clear_active(state, false, false);
++                true
++            }
++            _ => false,
++        }
++    }
++}
++
++impl XState {
++    pub(crate) fn handle_wayland_dnd(&mut self, event: ResolvedDndEvent) {
++        let mut dnd = std::mem::take(&mut self.dnd);
++        match event {
++            ResolvedDndEvent::Enter {
++                offer,
++                window,
++                x,
++                y,
++            } => dnd.enter(self, offer, window, x, y),
++            ResolvedDndEvent::Motion { x, y } => dnd.motion(self, x, y),
++            ResolvedDndEvent::Leave => dnd.leave(self),
++            ResolvedDndEvent::Drop => dnd.drop(self),
++        }
++        self.dnd = dnd;
++    }
++
++    pub(super) fn handle_dnd_xevent(
++        &mut self,
++        event: &xcb::Event,
++        server: &mut ServerState<RealConnection>,
++    ) -> bool {
++        let mut dnd = std::mem::take(&mut self.dnd);
++        let handled = dnd.handle_xevent(self, event, server);
++        self.dnd = dnd;
++        handled
++    }
++}
+diff --git a/src/xstate/mod.rs b/src/xstate/mod.rs
+index efcb13d..ab2e53e 100644
+--- a/src/xstate/mod.rs
++++ b/src/xstate/mod.rs
+@@ -1,5 +1,7 @@
+ mod settings;
+ use settings::Settings;
++mod dnd;
++use dnd::DndBridge;
+ mod selection;
+ use selection::{Selection, SelectionState};
+ #[cfg(test)]
+@@ -108,6 +110,7 @@ pub struct XState {
+     root: x::Window,
+     wm_window: x::Window,
+     selection_state: SelectionState,
++    dnd: DndBridge,
+     settings: Settings,
+     max_req_bytes: usize,
+ }
+@@ -215,6 +218,7 @@ impl XState {
+ 
+         let wm_window = connection.generate_id();
+         let selection_state = SelectionState::new(&connection, root, &atoms);
++        let dnd = DndBridge::new();
+         let window_atoms = WindowTypes::intern_all(&connection).unwrap();
+         let settings = Settings::new(&connection, &atoms, root);
+         // maximum-request-length is returned in units of 4 bytes.
+@@ -228,6 +232,7 @@ impl XState {
+             atoms,
+             window_atoms,
+             selection_state,
++            dnd,
+             settings,
+             max_req_bytes,
+         };
+@@ -306,6 +311,16 @@ impl XState {
+             })
+             .unwrap();
+ 
++        self.connection
++            .send_and_check_request(&x::ChangeProperty {
++                mode: x::PropMode::Replace,
++                window: self.wm_window,
++                property: self.atoms.xdnd_aware,
++                r#type: x::ATOM_ATOM,
++                data: &[dnd::XDND_VERSION],
++            })
++            .unwrap();
++
+         self.connection
+             .send_and_check_request(&x::ChangeProperty {
+                 mode: x::PropMode::Replace,
+@@ -344,6 +359,10 @@ impl XState {
+         while let Some(event) = self.connection.poll_for_event().unwrap() {
+             trace!("x11 event: {event:?}");
+ 
++            if self.handle_dnd_xevent(&event, server_state) {
++                continue;
++            }
++
+             if self.handle_selection_event(&event, server_state) {
+                 continue;
+             }
+@@ -920,6 +939,16 @@ xcb::atoms_struct! {
+         primary => b"PRIMARY" only_if_exists = false,
+         primary_targets => b"_primary_targets" only_if_exists = false,
+         moveresize => b"_NET_WM_MOVERESIZE" only_if_exists = false,
++        xdnd_selection => b"XdndSelection" only_if_exists = false,
++        xdnd_aware => b"XdndAware" only_if_exists = false,
++        xdnd_status => b"XdndStatus" only_if_exists = false,
++        xdnd_position => b"XdndPosition" only_if_exists = false,
++        xdnd_enter => b"XdndEnter" only_if_exists = false,
++        xdnd_leave => b"XdndLeave" only_if_exists = false,
++        xdnd_drop => b"XdndDrop" only_if_exists = false,
++        xdnd_finished => b"XdndFinished" only_if_exists = false,
++        xdnd_type_list => b"XdndTypeList" only_if_exists = false,
++        xdnd_action_copy => b"XdndActionCopy" only_if_exists = false,
+     }
+ }
+ 
+diff --git a/src/xstate/selection.rs b/src/xstate/selection.rs
+index 8500a79..c190e9e 100644
+--- a/src/xstate/selection.rs
++++ b/src/xstate/selection.rs
+@@ -920,7 +920,13 @@ impl XState {
+                     xcb::xfixes::SelectionEvent::SelectionClientClose
+                     | xcb::xfixes::SelectionEvent::SelectionWindowDestroy => {
+                         debug!("Selection owner destroyed, selection will be unset");
+-                        self.selection_state.clipboard.current_selection = None;
++                        if x == self.atoms.clipboard {
++                            self.selection_state.clipboard.current_selection = None;
++                            server_state.clear_x11_selection_source::<Clipboard>();
++                        } else {
++                            self.selection_state.primary.current_selection = None;
++                            server_state.clear_x11_selection_source::<Primary>();
++                        }
+                     }
+                 },
+                 x if x == self.atoms.xsettings => match e.subtype() {
+diff --git a/tests/integration.rs b/tests/integration.rs
+index 102aa96..ddc130d 100644
+--- a/tests/integration.rs
++++ b/tests/integration.rs
+@@ -382,6 +382,17 @@ xcb::atoms_struct! {
+         xsettings => b"_XSETTINGS_S0",
+         xsettings_setting => b"_XSETTINGS_SETTINGS",
+         moveresize => b"_NET_WM_MOVERESIZE",
++        xdnd_aware => b"XdndAware",
++        xdnd_selection => b"XdndSelection",
++        xdnd_status => b"XdndStatus",
++        xdnd_position => b"XdndPosition",
++        xdnd_enter => b"XdndEnter",
++        xdnd_leave => b"XdndLeave",
++        xdnd_drop => b"XdndDrop",
++        xdnd_finished => b"XdndFinished",
++        xdnd_action_copy => b"XdndActionCopy",
++        uri_list => b"text/uri-list" only_if_exists = false,
++        image_png => b"image/png" only_if_exists = false,
+     }
+ }
+ 
+@@ -652,6 +663,25 @@ impl Connection {
+         .unwrap();
+     }
+ 
++    #[track_caller]
++    fn send_client_message_to(&self, destination: x::Window, request: &x::ClientMessageEvent) {
++        self.send_and_check_request(&x::SendEvent {
++            propagate: false,
++            destination: x::SendEventDest::Window(destination),
++            event_mask: x::EventMask::empty(),
++            event: request,
++        })
++        .unwrap();
++    }
++
++    #[track_caller]
++    fn await_client_message(&mut self, ty: x::Atom) -> x::ClientMessageEvent {
++        match self.await_event() {
++            xcb::Event::X(x::Event::ClientMessage(event)) if event.r#type() == ty => event,
++            other => panic!("Expected ClientMessage {ty:?}, got {other:?}"),
++        }
++    }
++
+     fn get_xsettings(&self) -> Settings {
+         let owner = self
+             .get_reply(&x::GetSelectionOwner {
+@@ -1738,6 +1768,68 @@ fn wayland_then_x11_clipboard_owner() {
+     assert_eq!(request.target(), connection.atoms.targets);
+ }
+ 
++#[test]
++fn destroyed_x11_clipboard_owner_does_not_mask_wayland_image() {
++    let mut f = Fixture::new();
++    let mut connection = Connection::new(&f.display);
++    let owner = connection.new_window(connection.root, 0, 0, 20, 20, false);
++    f.map_as_toplevel(&mut connection, owner);
++
++    // Model xclip/cpsend: an X11 window owns CLIPBOARD and advertises a URI
++    // target, then disappears before it can serve future reads.
++    connection.set_selection_owner(owner, connection.atoms.clipboard);
++    let targets = connection.await_selection_request();
++    assert_eq!(targets.target(), connection.atoms.targets);
++    connection.set_property(
++        targets.requestor(),
++        x::ATOM_ATOM,
++        targets.property(),
++        &[connection.atoms.uri_list],
++    );
++    connection.send_selection_notify(&targets);
++    f.wait_and_dispatch();
++    assert!(
++        f.testwl
++            .data_source_mimes()
++            .contains(&"text/uri-list".to_string())
++    );
++
++    connection.destroy_window(owner);
++    f.wait_and_dispatch();
++
++    let image = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
++    f.testwl.create_data_offer(vec![testwl::PasteData {
++        mime_type: "image/png".into(),
++        data: image.clone(),
++    }]);
++    std::thread::sleep(Duration::from_millis(20));
++    connection.verify_clipboard_owner(connection.wm_window);
++
++    let requestor = connection.new_window(connection.root, 0, 0, 20, 20, false);
++    connection
++        .send_and_check_request(&x::ConvertSelection {
++            requestor,
++            selection: connection.atoms.clipboard,
++            target: connection.atoms.image_png,
++            property: connection.atoms.image_png,
++            time: x::CURRENT_TIME,
++        })
++        .unwrap();
++    std::thread::sleep(Duration::from_millis(50));
++    f.testwl.dispatch();
++    let notify = connection.await_selection_notify();
++    assert_eq!(notify.property(), connection.atoms.image_png);
++    let reply = connection.get_reply(&x::GetProperty {
++        delete: false,
++        window: requestor,
++        property: connection.atoms.image_png,
++        r#type: connection.atoms.image_png,
++        long_offset: 0,
++        long_length: image.len() as u32,
++    });
++    assert_eq!(reply.value::<u8>(), image);
++}
++
+ #[test]
+ fn fake_selection_targets() {
+     let mut f = Fixture::new();
+@@ -1794,6 +1886,122 @@ fn fake_selection_targets() {
+     );
+ }
+ 
++#[test]
++fn wayland_file_drag_to_x11_copy() {
++    let mut f = Fixture::new();
++    let mut connection = Connection::new(&f.display);
++    let window = connection.new_window(connection.root, 30, 40, 200, 120, false);
++    connection.set_property(window, x::ATOM_ATOM, connection.atoms.xdnd_aware, &[5_u32]);
++    let surface = f.map_as_toplevel(&mut connection, window);
++
++    let uri_data = b"file:///home/steven/Documents/xdnd-test.png\r\n".to_vec();
++    f.testwl.create_drag_offer(
++        surface,
++        vec![testwl::PasteData {
++            mime_type: "text/uri-list".into(),
++            data: uri_data.clone(),
++        }],
++        4.0,
++        5.0,
++    );
++
++    let enter = connection.await_client_message(connection.atoms.xdnd_enter);
++    let x::ClientMessageData::Data32(enter_data) = enter.data() else {
++        panic!("XdndEnter did not use 32-bit data");
++    };
++    assert_eq!(enter.window(), window);
++    assert_eq!(enter_data[0], connection.wm_window.resource_id());
++    assert_eq!(enter_data[1] >> 24, 5);
++    assert_eq!(enter_data[2], connection.atoms.uri_list.resource_id());
++
++    let first_position = connection.await_client_message(connection.atoms.xdnd_position);
++    let x::ClientMessageData::Data32(first_position_data) = first_position.data() else {
++        panic!("XdndPosition did not use 32-bit data");
++    };
++    assert_eq!(first_position_data[0], connection.wm_window.resource_id());
++    assert_eq!(
++        first_position_data[4],
++        connection.atoms.xdnd_action_copy.resource_id()
++    );
++
++    // XDND permits only one Position/Status round trip at a time.  Queue two
++    // motions and a drop while the first Position is pending; only the newest
++    // position must be emitted after Status, and Drop must wait for its Status.
++    f.testwl.drag_motion(10.0, 11.0);
++    f.testwl.drag_motion(20.0, 21.0);
++    f.testwl.drag_drop();
++    std::thread::sleep(Duration::from_millis(50));
++
++    let status = x::ClientMessageEvent::new(
++        connection.wm_window,
++        connection.atoms.xdnd_status,
++        x::ClientMessageData::Data32([
++            window.resource_id(),
++            1,
++            0,
++            0,
++            connection.atoms.xdnd_action_copy.resource_id(),
++        ]),
++    );
++    connection.send_client_message_to(connection.wm_window, &status);
++    let cached_position = connection.await_client_message(connection.atoms.xdnd_position);
++    let x::ClientMessageData::Data32(cached_position_data) = cached_position.data() else {
++        panic!("cached XdndPosition did not use 32-bit data");
++    };
++    assert_ne!(cached_position_data[2], first_position_data[2]);
++
++    connection.send_client_message_to(connection.wm_window, &status);
++    let drop = connection.await_client_message(connection.atoms.xdnd_drop);
++    let x::ClientMessageData::Data32(drop_data) = drop.data() else {
++        panic!("XdndDrop did not use 32-bit data");
++    };
++    assert_eq!(drop_data[0], connection.wm_window.resource_id());
++
++    // A compositor leave after drop must not destroy the retained offer before
++    // the X target asks for XdndSelection data.
++    f.testwl.drag_leave();
++    connection
++        .send_and_check_request(&x::ConvertSelection {
++            requestor: window,
++            selection: connection.atoms.xdnd_selection,
++            target: connection.atoms.uri_list,
++            property: connection.atoms.uri_list,
++            time: x::CURRENT_TIME,
++        })
++        .unwrap();
++    f.testwl.dispatch();
++    let notify = connection.await_selection_notify();
++    assert_eq!(notify.property(), connection.atoms.uri_list);
++    let reply = connection.get_reply(&x::GetProperty {
++        delete: false,
++        window,
++        property: connection.atoms.uri_list,
++        r#type: connection.atoms.uri_list,
++        long_offset: 0,
++        long_length: uri_data.len() as u32,
++    });
++    assert_eq!(reply.value::<u8>(), uri_data);
++
++    let finished = x::ClientMessageEvent::new(
++        connection.wm_window,
++        connection.atoms.xdnd_finished,
++        x::ClientMessageData::Data32([
++            window.resource_id(),
++            1,
++            connection.atoms.xdnd_action_copy.resource_id(),
++            0,
++            0,
++        ]),
++    );
++    connection.send_client_message_to(connection.wm_window, &finished);
++    std::thread::sleep(Duration::from_millis(20));
++    f.testwl.dispatch();
++    let owner = connection.get_reply(&x::GetSelectionOwner {
++        selection: connection.atoms.xdnd_selection,
++    });
++    assert_eq!(owner.owner(), x::Window::none());
++}
++
+ #[test]
+ fn popup_done() {
+     let mut f = Fixture::new();
+diff --git a/testwl/src/lib.rs b/testwl/src/lib.rs
+index b9b5503..cde8ef2 100644
+--- a/testwl/src/lib.rs
++++ b/testwl/src/lib.rs
+@@ -281,6 +281,7 @@ struct State {
+     primary: Option<ZwpPrimarySelectionSourceV1>,
+     data_device_man: Option<WlDataDeviceManager>,
+     data_device: Option<WlDataDevice>,
++    drag_offer: Option<WlDataOffer>,
+     primary_man: Option<ZwpPrimarySelectionDeviceManagerV1>,
+     primary_device: Option<ZwpPrimarySelectionDeviceV1>,
+     xdg_activation: Option<XdgActivationV1>,
+@@ -315,6 +316,7 @@ impl Default for State {
+             primary_device: None,
+             data_device_man: None,
+             data_device: None,
++            drag_offer: None,
+             xdg_activation: None,
+             valid_tokens: HashSet::new(),
+             token_counter: 0,
+@@ -815,6 +817,68 @@ impl Server {
+         self.display.flush_clients().unwrap();
+     }
+ 
++    #[track_caller]
++    pub fn create_drag_offer(&mut self, surface: SurfaceId, data: Vec<PasteData>, x: f64, y: f64) {
++        let dev = self
++            .state
++            .data_device
++            .as_ref()
++            .expect("No data device created");
++        let surface = &self
++            .state
++            .surfaces
++            .get(&surface)
++            .expect("No such drag target surface")
++            .surface;
++        let mimes: Vec<_> = data.iter().map(|item| item.mime_type.clone()).collect();
++        let offer = self
++            .client
++            .as_ref()
++            .unwrap()
++            .create_resource::<_, _, State>(&self.dh, 3, data)
++            .unwrap();
++        dev.data_offer(&offer);
++        for mime in mimes {
++            offer.offer(mime);
++        }
++        offer.source_actions(wl_data_device_manager::DndAction::Copy);
++        offer.action(wl_data_device_manager::DndAction::Copy);
++        dev.enter(42, surface, x, y, Some(&offer));
++        self.state.drag_offer = Some(offer);
++        self.display.flush_clients().unwrap();
++    }
++
++    #[track_caller]
++    pub fn drag_motion(&mut self, x: f64, y: f64) {
++        self.state
++            .data_device
++            .as_ref()
++            .expect("No data device created")
++            .motion(self.state.begin.elapsed().as_millis() as u32, x, y);
++        self.display.flush_clients().unwrap();
++    }
++
++    #[track_caller]
++    pub fn drag_drop(&mut self) {
++        self.state
++            .data_device
++            .as_ref()
++            .expect("No data device created")
++            .drop();
++        self.display.flush_clients().unwrap();
++    }
++
++    #[track_caller]
++    pub fn drag_leave(&mut self) {
++        self.state
++            .data_device
++            .as_ref()
++            .expect("No data device created")
++            .leave();
++        self.state.drag_offer = None;
++        self.display.flush_clients().unwrap();
++    }
++
+     #[track_caller]
+     pub fn create_primary_offer(&mut self, data: Vec<PasteData>) {
+         let Some(dev) = &self.state.primary_device else {
+@@ -1316,6 +1380,9 @@ impl Dispatch<WlDataOffer, Vec<PasteData>> for State {
+ 
+                 TransferFd::from(fd).write_all(&data[pos].data).unwrap();
+             }
++            wl_data_offer::Request::Accept { .. }
++            | wl_data_offer::Request::SetActions { .. }
++            | wl_data_offer::Request::Finish => {}
+             wl_data_offer::Request::Destroy => {}
+             other => todo!("unhandled request: {other:?}"),
+         }

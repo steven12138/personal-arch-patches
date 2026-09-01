@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -u
+
+mode=${1:---apply}
+target=/usr/share/quickshell/dms-greeter/Modules/Greetd/GreeterContent.qml
+patch_file=/usr/share/dms-material-transition/0001-greeter-material-exit.patch
+
+case "$mode" in
+    --apply|--check|--remove) ;;
+    *) printf '%s\n' "Usage: $0 [--apply|--check|--remove]" >&2; exit 2 ;;
+esac
+
+if [ ! -e "$target" ]; then
+    printf '%s\n' "dms-material-transition: greeter QML not installed; skipping optional patch"
+    exit 0
+fi
+
+if [ "$mode" = --remove ]; then
+    if ! grep -Fq 'property bool materialSessionTransitionActive: false' "$target"; then
+        printf '%s\n' "dms-material-transition: greeter transition patch is already absent"
+        exit 0
+    fi
+    if ! patch --dry-run --silent --reverse --batch --directory=/ --strip=1 <"$patch_file"; then
+        printf '%s\n' "dms-material-transition: ERROR: greeter transition patch cannot be removed safely" >&2
+        exit 1
+    fi
+    patch --silent --reverse --batch --directory=/ --strip=1 <"$patch_file"
+    printf '%s\n' "dms-material-transition: removed greeter transition patch"
+    exit 0
+fi
+
+if grep -Fq 'property bool materialSessionTransitionActive: false' "$target"; then
+    printf '%s\n' "dms-material-transition: greeter transition patch is present"
+    exit 0
+fi
+
+if ! patch --dry-run --silent --forward --batch --directory=/ --strip=1 <"$patch_file"; then
+    printf '%s\n' "dms-material-transition: ERROR: greeter patch is incompatible with the installed version" >&2
+    exit 1
+fi
+
+if [ "$mode" = --check ]; then
+    printf '%s\n' "dms-material-transition: greeter transition patch is pending" >&2
+    exit 1
+fi
+
+patch --silent --forward --batch --directory=/ --strip=1 <"$patch_file"
+printf '%s\n' "dms-material-transition: applied greeter transition patch"

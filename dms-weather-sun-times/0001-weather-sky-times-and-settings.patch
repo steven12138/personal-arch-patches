@@ -1,0 +1,496 @@
+--- a/usr/share/quickshell/dms/Modules/DankDash/WeatherTab.qml
++++ b/usr/share/quickshell/dms/Modules/DankDash/WeatherTab.qml
+@@ -54,28 +54,37 @@
+         syncing = false;
+     }
+ 
+-    readonly property string sunriseTimeText: {
+-        if (!WeatherService.weather.rawSunrise)
+-            return WeatherService.weather.sunrise || "";
++    function formatSunTime(rawTime, fallback) {
++        if (!rawTime)
++            return fallback || "--";
+         try {
+-            const date = new Date(WeatherService.weather.rawSunrise);
++            const date = new Date(rawTime);
+             const format = SettingsData.use24HourClock ? "HH:mm" : "h:mm AP";
+             return date.toLocaleTimeString(Qt.locale(), format);
+         } catch (e) {
+-            return WeatherService.weather.sunrise || "";
++            return fallback || "--";
+         }
+     }
+ 
+-    readonly property string sunsetTimeText: {
+-        if (!WeatherService.weather.rawSunset)
+-            return WeatherService.weather.sunset || "";
+-        try {
+-            const date = new Date(WeatherService.weather.rawSunset);
+-            const format = SettingsData.use24HourClock ? "HH:mm" : "h:mm AP";
+-            return date.toLocaleTimeString(Qt.locale(), format);
+-        } catch (e) {
+-            return WeatherService.weather.sunset || "";
+-        }
++    readonly property string sunriseTimeText: formatSunTime(WeatherService.weather.rawSunrise, WeatherService.weather.sunrise)
++    readonly property string sunsetTimeText: formatSunTime(WeatherService.weather.rawSunset, WeatherService.weather.sunset)
++    readonly property var selectedDayForecast: {
++        const forecast = WeatherService.weather.forecast || [];
++        const index = WeatherService.calendarDayDifference(new Date(), dateStepper.currentDate);
++        return index >= 0 && index < forecast.length ? forecast[index] : null;
++    }
++    readonly property string selectedSunriseTimeText: formatSunTime(selectedDayForecast?.rawSunrise, selectedDayForecast?.sunrise)
++    readonly property string selectedSunsetTimeText: formatSunTime(selectedDayForecast?.rawSunset, selectedDayForecast?.sunset)
++    readonly property string selectedTimeText: dateStepper.currentDate.toLocaleTimeString(Qt.locale(), SettingsData.use24HourClock ? "HH:mm" : "h:mm AP")
++    readonly property var selectedSunTimes: WeatherService.getSunTimes(dateStepper.currentDate)
++    readonly property var selectedSunriseDate: selectedDayForecast?.rawSunrise ? new Date(selectedDayForecast.rawSunrise) : selectedSunTimes?.sunrise
++    readonly property var selectedSunsetDate: selectedDayForecast?.rawSunset ? new Date(selectedDayForecast.rawSunset) : selectedSunTimes?.sunset
++
++    function timeOfDayFraction(date) {
++        if (!date)
++            return 0;
++        const value = new Date(date);
++        return (value.getHours() * 3600 + value.getMinutes() * 60 + value.getSeconds()) / 86400;
+     }
+ 
+     readonly property var heroMetrics: {
+@@ -341,8 +350,12 @@
+                 LayoutMirroring.childrenInherit: true
+ 
+                 property var currentDate: new Date()
++                property bool userAdjustedTime: false
++                readonly property bool followsCurrentTime: SettingsData.weatherSkyFollowCurrentTime && !userAdjustedTime
+ 
+                 readonly property var changeDate: (magnitudeIndex, sign) => {
++                    if (magnitudeIndex !== 0)
++                        dateStepper.userAdjustedTime = true;
+                     switch (magnitudeIndex) {
+                     case 0:
+                         break;
+@@ -364,6 +377,14 @@
+                 }
+                 readonly property var splitDate: Qt.formatDateTime(dateStepper.currentDate, SettingsData.use24HourClock ? "yyyy.MM.dd.HH.mm" : "yyyy.MM.dd.hh.mm.AP").split('.')
+ 
++                Timer {
++                    interval: 60000
++                    repeat: true
++                    running: dateStepper.followsCurrentTime
++                    triggeredOnStart: true
++                    onTriggered: dateStepper.currentDate = new Date()
++                }
++
+                 Item {
+                     id: dateStepperInner
+                     anchors.horizontalCenter: parent.horizontalCenter
+@@ -469,12 +490,13 @@
+                         id: dateResetButton
+                         anchors.verticalCenter: parent.verticalCenter
+                         anchors.right: parent.right
+-                        enabled: Math.abs(dateStepper.currentDate - new Date()) > 1000
++                        enabled: !dateStepper.followsCurrentTime
+                         iconColor: enabled ? Theme.blendAlpha(Theme.surfaceText, 0.5) : Theme.withAlpha(Theme.blendAlpha(Theme.surfaceText, 0.5), 0)
+                         iconSize: 12
+                         buttonSize: 20
+                         iconName: "replay"
+                         onClicked: {
++                            dateStepper.userAdjustedTime = false;
+                             dateStepper.currentDate = new Date();
+                         }
+                     }
+@@ -602,15 +624,15 @@
+                         ShapePath {
+                             strokeColor: "transparent"
+                             fillGradient: RadialGradient {
+-                                centerX: skyBox.hMargin + sun.x + sun.width / 2
+-                                centerY: skyBox.vMargin + sun.y + 30
++                                centerX: skyBox.hMargin + (SettingsData.weatherSkyUseTimeline ? timelineSun.x + timelineSun.width / 2 : sun.x + sun.width / 2)
++                                centerY: skyBox.vMargin + (SettingsData.weatherSkyUseTimeline ? timelineSun.y + timelineSun.height / 2 : sun.y + sun.height / 2) + 30
+                                 centerRadius: {
+                                     const a = Math.abs((skyBox.sunTime?.dayPercent ?? 0) - 0.5);
+                                     const out = 200 * (0.5 - a * a);
+                                     return out;
+                                 }
+-                                focalX: skyBox.hMargin + sun.x + sun.width / 2
+-                                focalY: skyBox.vMargin + sun.y
++                                focalX: skyBox.hMargin + (SettingsData.weatherSkyUseTimeline ? timelineSun.x + timelineSun.width / 2 : sun.x + sun.width / 2)
++                                focalY: skyBox.vMargin + (SettingsData.weatherSkyUseTimeline ? timelineSun.y + timelineSun.height / 2 : sun.y + sun.height / 2)
+                                 GradientStop {
+                                     position: 0
+                                     color: skyBox.sunColor
+@@ -645,8 +667,8 @@
+                         ShapePath {
+                             strokeColor: "transparent"
+                             fillGradient: RadialGradient {
+-                                centerX: sun.x
+-                                centerY: sun.y
++                                centerX: SettingsData.weatherSkyUseTimeline ? timelineSun.x : sun.x
++                                centerY: SettingsData.weatherSkyUseTimeline ? timelineSun.y : sun.y
+                                 centerRadius: 500
+                                 focalX: centerX
+                                 focalY: centerY + 0.99 * (centerRadius - focalRadius)
+@@ -689,6 +711,7 @@
+ 
+                     Shape {
+                         anchors.fill: parent
++                        visible: !SettingsData.weatherSkyUseTimeline
+ 
+                         ShapePath {
+                             strokeColor: Theme.withAlpha(Theme.outline, 0.2)
+@@ -710,6 +733,7 @@
+ 
+                     StyledText {
+                         id: middle
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         text: skyBox.solarNoonIsSouth ? "S" : "N"
+                         font.pixelSize: Theme.fontSizeSmall
+                         color: Theme.primary
+@@ -719,6 +743,7 @@
+ 
+                     StyledText {
+                         id: left
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         text: skyBox.solarNoonIsSouth ? "E" : "W"
+                         font.pixelSize: Theme.fontSizeSmall
+                         color: Theme.primary
+@@ -728,6 +753,7 @@
+ 
+                     StyledText {
+                         id: right
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         text: skyBox.solarNoonIsSouth ? "W" : "E"
+                         font.pixelSize: Theme.fontSizeSmall
+                         color: Theme.primary
+@@ -736,6 +762,7 @@
+                     }
+ 
+                     Rectangle {
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         height: 1
+                         anchors.leftMargin: Theme.spacingS
+                         anchors.rightMargin: Theme.spacingS
+@@ -746,6 +773,7 @@
+                     }
+ 
+                     Rectangle {
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         height: 1
+                         anchors.leftMargin: Theme.spacingS
+                         anchors.rightMargin: Theme.spacingS
+@@ -756,6 +784,7 @@
+                     }
+ 
+                     Rectangle {
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         height: 1
+                         anchors.leftMargin: Theme.spacingS
+                         anchors.rightMargin: Theme.spacingS
+@@ -766,6 +795,7 @@
+                     }
+ 
+                     Rectangle {
++                        visible: !SettingsData.weatherSkyUseTimeline
+                         height: 1
+                         anchors.leftMargin: Theme.spacingS
+                         anchors.rightMargin: Theme.spacingS
+@@ -781,7 +811,7 @@
+                         size: Theme.fontSizeXLarge
+                         color: Theme.withAlpha(Theme.surfaceText, 0.7)
+                         rotation: (WeatherService.getMoonAngle(skyBox.currentDate) || 0) / Math.PI * 180
+-                        visible: !!pos
++                        visible: !SettingsData.weatherSkyUseTimeline && !!pos
+ 
+                         property var pos: WeatherService.getSkyArcPosition(skyBox.currentDate, false)
+                         x: (pos?.h ?? 0) * skyBox.effectiveWidth - (moonPhase.width / 2) + skyBox.hMargin
+@@ -793,12 +823,142 @@
+                         name: "light_mode"
+                         size: Theme.fontSizeXLarge
+                         color: Theme.primary
+-                        visible: !!pos
++                        visible: !SettingsData.weatherSkyUseTimeline && !!pos
+ 
+                         property var pos: WeatherService.getSkyArcPosition(skyBox.currentDate, true)
+                         x: (pos?.h ?? 0) * skyBox.effectiveWidth - (sun.width / 2) + skyBox.hMargin
+                         y: (pos?.v ?? 0) * -(skyBox.effectiveHeight / 2) + skyBox.effectiveHeight / 2 - (sun.height / 2) + skyBox.vMargin
+                     }
++
++                    Item {
++                        id: sunTimeline
++                        anchors.fill: parent
++                        visible: SettingsData.weatherSkyUseTimeline
++
++                        Shape {
++                            anchors.fill: parent
++
++                            ShapePath {
++                                strokeColor: Theme.withAlpha(Theme.outline, 0.35)
++                                strokeWidth: 1
++                                fillColor: "transparent"
++
++                                PathPolyline {
++                                    path: {
++                                        const points = WeatherService.getSunTimeline(dateStepper.currentDate) ?? [];
++                                        const out = [];
++                                        for (let i = 0; i < points.length; i++) {
++                                            out.push(Qt.point(points[i].h * skyBox.effectiveWidth + skyBox.hMargin, points[i].v * -(skyBox.effectiveHeight / 2) + skyBox.effectiveHeight / 2 + skyBox.vMargin));
++                                        }
++                                        return out;
++                                    }
++                                }
++                            }
++                        }
++
++                        Rectangle {
++                            anchors.left: parent.left
++                            anchors.right: parent.right
++                            y: skyBox.effectiveHeight / 2 + skyBox.vMargin
++                            height: 1
++                            color: Theme.outline
++                        }
++
++                        Repeater {
++                            model: [
++                                { "fraction": 0, "text": "00:00" },
++                                { "fraction": 0.5, "text": "12:00" },
++                                { "fraction": 1, "text": "24:00" }
++                            ]
++
++                            StyledText {
++                                required property var modelData
++                                text: modelData.text
++                                font.pixelSize: Theme.fontSizeSmall - 2
++                                color: Theme.withAlpha(Theme.surfaceText, 0.45)
++                                x: Math.max(0, Math.min(sunTimeline.width - width, modelData.fraction * sunTimeline.width - width / 2))
++                                y: sunTimeline.height - height
++                            }
++                        }
++
++                        Rectangle {
++                            id: sunriseTick
++                            visible: SettingsData.weatherSkyShowSunTimes && !!root.selectedSunriseDate
++                            x: root.timeOfDayFraction(root.selectedSunriseDate) * parent.width
++                            y: skyBox.effectiveHeight / 2 + skyBox.vMargin - 4
++                            width: 1
++                            height: 9
++                            color: Theme.primary
++                        }
++
++                        Rectangle {
++                            id: sunsetTick
++                            visible: SettingsData.weatherSkyShowSunTimes && !!root.selectedSunsetDate
++                            x: root.timeOfDayFraction(root.selectedSunsetDate) * parent.width
++                            y: skyBox.effectiveHeight / 2 + skyBox.vMargin - 4
++                            width: 1
++                            height: 9
++                            color: Theme.primary
++                        }
++
++                        StyledText {
++                            id: sunriseTimelineLabel
++                            visible: SettingsData.weatherSkyShowSunTimes && !!root.selectedSunriseDate
++                            text: I18n.tr("Sunrise") + " " + root.selectedSunriseTimeText
++                            font.pixelSize: Theme.fontSizeSmall
++                            color: Theme.primary
++                            x: Math.max(0, Math.min(sunTimeline.width - width, sunriseTick.x - width / 2))
++                            y: sunriseTick.y - height - Theme.spacingXS
++                        }
++
++                        StyledText {
++                            id: sunsetTimelineLabel
++                            visible: SettingsData.weatherSkyShowSunTimes && !!root.selectedSunsetDate
++                            text: I18n.tr("Sunset") + " " + root.selectedSunsetTimeText
++                            font.pixelSize: Theme.fontSizeSmall
++                            color: Theme.primary
++                            x: Math.max(0, Math.min(sunTimeline.width - width, sunsetTick.x - width / 2))
++                            y: sunsetTick.y + sunsetTick.height + Theme.spacingXS
++                        }
++                    }
++
++                    Rectangle {
++                        id: timelineSun
++                        readonly property var pos: WeatherService.getSunTimelinePosition(skyBox.currentDate)
++                        width: 14
++                        height: 14
++                        radius: width / 2
++                        color: Theme.primary
++                        border.width: 2
++                        border.color: Theme.surface
++                        visible: SettingsData.weatherSkyUseTimeline && !!pos
++                        x: (pos?.h ?? 0) * skyBox.effectiveWidth - width / 2 + skyBox.hMargin
++                        y: (pos?.v ?? 0) * -(skyBox.effectiveHeight / 2) + skyBox.effectiveHeight / 2 - height / 2 + skyBox.vMargin
++                    }
++
++                    Rectangle {
++                        id: currentTimeBadge
++                        readonly property var target: timelineSun
++                        readonly property real rightSideX: target.x + target.width + Theme.spacingXS
++                        width: currentTimeLabel.implicitWidth + Theme.spacingM
++                        height: currentTimeLabel.implicitHeight + Theme.spacingXS
++                        radius: height / 2
++                        color: Theme.withAlpha(Theme.surface, 0.9)
++                        border.width: 1
++                        border.color: Theme.withAlpha(Theme.outline, 0.35)
++                        visible: SettingsData.weatherSkyUseTimeline && SettingsData.weatherSkyShowCurrentTime && timelineSun.visible
++                        x: rightSideX + width <= skyBox.width ? rightSideX : Math.max(0, target.x - width - Theme.spacingXS)
++                        y: Math.max(0, Math.min(skyBox.height - height, target.y + target.height / 2 - height / 2))
++
++                        StyledText {
++                            id: currentTimeLabel
++                            anchors.centerIn: parent
++                            text: (dateStepper.followsCurrentTime ? I18n.tr("Now") + " · " : "") + root.selectedTimeText
++                            font.pixelSize: Theme.fontSizeSmall
++                            font.weight: Font.Medium
++                            color: Theme.surfaceText
++                        }
++                    }
+                 }
+             }
+         }
+--- a/usr/share/quickshell/dms/Services/WeatherService.qml
++++ b/usr/share/quickshell/dms/Services/WeatherService.qml
+@@ -220,6 +220,44 @@
+         return sortedEntries;
+     }
+ 
++    function getSunTimeline(date, points = 96) {
++        if (!location) {
++            return null;
++        }
++        const lat = location.latitude;
++        const lon = location.longitude;
++        const day = new Date(date);
++        const year = day.getFullYear();
++        const month = day.getMonth();
++        const dayOfMonth = day.getDate();
++        const timeline = [];
++
++        for (let i = 0; i <= points; i++) {
++            const minuteOfDay = i / points * 24 * 60;
++            const sample = new Date(year, month, dayOfMonth, 0, minuteOfDay, 0, 0);
++            const pos = SunCalc.getPosition(sample, lat, lon);
++            timeline.push({
++                h: i / points,
++                v: Math.max(-1, Math.min(1, Math.sin(pos.altitude)))
++            });
++        }
++
++        return timeline;
++    }
++
++    function getSunTimelinePosition(date) {
++        if (!location) {
++            return null;
++        }
++        const value = new Date(date);
++        const pos = SunCalc.getPosition(value, location.latitude, location.longitude);
++        const seconds = value.getHours() * 3600 + value.getMinutes() * 60 + value.getSeconds();
++        return {
++            h: seconds / 86400,
++            v: Math.max(-1, Math.min(1, Math.sin(pos.altitude)))
++        };
++    }
++
+     function getCurrentSunTime(date) {
+         const times = getSunTimes(date);
+         if (!times) {
+--- a/usr/share/quickshell/dms/Common/SettingsData.qml
++++ b/usr/share/quickshell/dms/Common/SettingsData.qml
+@@ -545,6 +545,10 @@
+     readonly property string weatherCoordinates: SessionData.weatherCoordinates
+     property bool useAutoLocation: false
+     property bool weatherEnabled: true
++    property bool weatherSkyUseTimeline: true
++    property bool weatherSkyShowSunTimes: true
++    property bool weatherSkyShowCurrentTime: true
++    property bool weatherSkyFollowCurrentTime: true
+ 
+     readonly property var _dashTabIds: ["overview", "media", "wallpaper", "weather", "settings"]
+     readonly property var _dashTabsDefault: [
+--- a/usr/share/quickshell/dms/Common/settings/SettingsSpec.js
++++ b/usr/share/quickshell/dms/Common/settings/SettingsSpec.js
+@@ -270,6 +270,10 @@
+ 
+     useAutoLocation: { def: false },
+     weatherEnabled: { def: true },
++    weatherSkyUseTimeline: { def: true },
++    weatherSkyShowSunTimes: { def: true },
++    weatherSkyShowCurrentTime: { def: true },
++    weatherSkyFollowCurrentTime: { def: true },
+     dashTabs: { def: [{ id: "overview", enabled: true }, { id: "media", enabled: true }, { id: "wallpaper", enabled: true }, { id: "weather", enabled: true }, { id: "settings", enabled: true }] },
+ 
+     networkPreference: { def: "auto" },
+--- a/usr/share/quickshell/dms/Modules/Settings/TimeWeatherTab.qml
++++ b/usr/share/quickshell/dms/Modules/Settings/TimeWeatherTab.qml
+@@ -468,6 +468,74 @@
+ 
+                     SettingsToggleRow {
+                         tab: "time"
++                        tags: ["weather", "sky", "timeline", "sunrise", "sunset"]
++                        settingKey: "weatherSkyUseTimeline"
++                        text: I18n.tr("Use Sunrise and Sunset Timeline")
++                        description: I18n.tr("Use a 00:00–24:00 sun timeline instead of the original celestial direction chart")
++                        checked: SettingsData.weatherSkyUseTimeline
++                        onToggled: checked => SettingsData.set("weatherSkyUseTimeline", checked)
++                    }
++
++                    Rectangle {
++                        width: parent.width
++                        height: 1
++                        color: Theme.outline
++                        opacity: 0.15
++                    }
++
++                    SettingsToggleRow {
++                        tab: "time"
++                        tags: ["weather", "sky", "sunrise", "sunset", "time"]
++                        settingKey: "weatherSkyShowSunTimes"
++                        text: I18n.tr("Show Sunrise and Sunset")
++                        description: I18n.tr("Show sunrise and sunset labels on the sun timeline")
++                        checked: SettingsData.weatherSkyShowSunTimes
++                        onToggled: checked => SettingsData.set("weatherSkyShowSunTimes", checked)
++                    }
++
++                    Rectangle {
++                        width: parent.width
++                        height: 1
++                        color: Theme.outline
++                        opacity: 0.15
++                    }
++
++                    SettingsToggleRow {
++                        tab: "time"
++                        tags: ["weather", "sky", "current", "time"]
++                        settingKey: "weatherSkyShowCurrentTime"
++                        text: I18n.tr("Show Current Time")
++                        description: I18n.tr("Show the selected time next to the sun timeline marker")
++                        checked: SettingsData.weatherSkyShowCurrentTime
++                        onToggled: checked => SettingsData.set("weatherSkyShowCurrentTime", checked)
++                    }
++
++                    Rectangle {
++                        width: parent.width
++                        height: 1
++                        color: Theme.outline
++                        opacity: 0.15
++                    }
++
++                    SettingsToggleRow {
++                        tab: "time"
++                        tags: ["weather", "sky", "follow", "current", "time"]
++                        settingKey: "weatherSkyFollowCurrentTime"
++                        text: I18n.tr("Follow Current Time")
++                        description: I18n.tr("Update the sky chart time automatically every minute")
++                        checked: SettingsData.weatherSkyFollowCurrentTime
++                        onToggled: checked => SettingsData.set("weatherSkyFollowCurrentTime", checked)
++                    }
++
++                    Rectangle {
++                        width: parent.width
++                        height: 1
++                        color: Theme.outline
++                        opacity: 0.15
++                    }
++
++                    SettingsToggleRow {
++                        tab: "time"
+                         tags: ["weather", "imperial", "fahrenheit", "units"]
+                         settingKey: "useFahrenheit"
+                         text: I18n.tr("Use Imperial Units")

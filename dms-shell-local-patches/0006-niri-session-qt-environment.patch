@@ -1,0 +1,22 @@
+--- a/usr/bin/niri-session
++++ b/usr/bin/niri-session
+@@ -41,6 +41,9 @@
+         ${XDG_SESSION_TYPE:+XDG_SESSION_TYPE} \
+         ${XDG_CURRENT_DESKTOP:+XDG_CURRENT_DESKTOP} \
+         ${NIRI_SOCKET:+NIRI_SOCKET} \
++        ${QT_QPA_PLATFORM:+QT_QPA_PLATFORM} \
++        ${QT_QPA_PLATFORMTHEME:+QT_QPA_PLATFORMTHEME} \
++        ${QT_QPA_PLATFORMTHEME_QT6:+QT_QPA_PLATFORMTHEME_QT6} \
+         ${DBUS_SESSION_BUS_ADDRESS:+DBUS_SESSION_BUS_ADDRESS} \
+         ${XDG_SESSION_ID:+XDG_SESSION_ID} \
+         ${XDG_SESSION_CLASS:+XDG_SESSION_CLASS} ${XDG_SEAT:+XDG_SEAT}
+@@ -57,7 +60,8 @@
+     systemctl --user start --job-mode=replace-irreversibly niri-shutdown.target
+ 
+     # Unset environment that we've set.
+-    systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP NIRI_SOCKET
++    systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP NIRI_SOCKET \
++        QT_QPA_PLATFORM QT_QPA_PLATFORMTHEME QT_QPA_PLATFORMTHEME_QT6
+ elif hash dinitctl >/dev/null 2>&1; then
+     # Make sure there's no already running session.
+     if ! pgrep -u "$(id -u)" dinit >/dev/null 2>&1; then

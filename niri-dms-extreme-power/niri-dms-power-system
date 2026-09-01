@@ -1,0 +1,149 @@
+#!/bin/sh
+set -eu
+
+config=/etc/niri-dms-extreme-power.conf
+[ ! -r "$config" ] || . "$config"
+
+: "${MANAGE_BLUETOOTH:=1}"
+: "${MANAGE_NVIDIA_POWERD:=1}"
+: "${MANAGE_NVIDIA_GPU:=1}"
+: "${REMOVE_NVIDIA_ON_POWER_SAVER:=1}"
+: "${LOCK_FANS_ON_POWER_SAVER:=1}"
+: "${NVIDIA_PCI_DEVICE:=0000:01:00.0}"
+: "${NVIDIA_AUDIO_PCI_DEVICE:=0000:01:00.1}"
+: "${NVIDIA_PARENT_PCI_DEVICE:=0000:00:01.0}"
+
+set_nvidia_runtime_pm() {
+    state=$1
+    control="/sys/bus/pci/devices/$NVIDIA_PCI_DEVICE/power/control"
+
+    [ "$MANAGE_NVIDIA_GPU" = 1 ] || return 0
+    [ -w "$control" ] || return 0
+    printf '%s\n' "$state" >"$control" || true
+}
+
+remove_nvidia_gpu() {
+    [ "$MANAGE_NVIDIA_GPU" = 1 ] || return 0
+    [ "$REMOVE_NVIDIA_ON_POWER_SAVER" = 1 ] || return 0
+    [ -e "/sys/bus/pci/devices/$NVIDIA_PCI_DEVICE" ] || return 0
+
+    # Pass only loaded modules: modprobe reports an absent optional nvidia_uvm
+    # as an error. If an offloaded application owns a loaded module, removal
+    # still fails safely and the PCI device is deliberately left untouched.
+    set --
+    for module in nvidia_drm nvidia_modeset nvidia_uvm nvidia; do
+        [ ! -d "/sys/module/$module" ] || set -- "$@" "$module"
+    done
+    [ "$#" -eq 0 ] || /usr/bin/modprobe -r "$@" || return 0
+
+    for device in "$NVIDIA_AUDIO_PCI_DEVICE" "$NVIDIA_PCI_DEVICE"; do
+        remove="/sys/bus/pci/devices/$device/remove"
+        [ -w "$remove" ] || continue
+        printf '1\n' >"$remove" || true
+    done
+}
+
+restore_nvidia_gpu() {
+    [ "$MANAGE_NVIDIA_GPU" = 1 ] || return 0
+    [ "$REMOVE_NVIDIA_ON_POWER_SAVER" = 1 ] || return 0
+
+    if [ ! -e "/sys/bus/pci/devices/$NVIDIA_PCI_DEVICE" ]; then
+        rescan="/sys/bus/pci/devices/$NVIDIA_PARENT_PCI_DEVICE/rescan"
+        [ -w "$rescan" ] || return 0
+        printf '1\n' >"$rescan" || return 0
+        /usr/bin/udevadm settle || true
+    fi
+
+    /usr/bin/modprobe nvidia_drm || true
+    set_nvidia_runtime_pm auto
+}
+
+# `lockfancontroller` freezes the current EC fan speed.  It is not a command
+# to reduce speed, so lock only after both fans already report 0 RPM.  This
+# keeps the experiment inert on laptops without the Legion driver or sensors.
+legion_fans_stopped() {
+    for hwmon in /sys/class/hwmon/hwmon*; do
+        [ -r "$hwmon/name" ] || continue
+        [ "$(cat "$hwmon/name")" = legion_hwmon ] || continue
+        [ -r "$hwmon/fan1_input" ] && [ -r "$hwmon/fan2_input" ] || return 1
+        [ "$(cat "$hwmon/fan1_input")" = 0 ] && [ "$(cat "$hwmon/fan2_input")" = 0 ]
+        return
+    done
+    return 1
+}
+
+set_legion_fan_lock() {
+    value=$1
+    lock=/sys/devices/platform/legion/lockfancontroller
+
+    [ -w "$lock" ] || return 0
+    printf '%s\n' "$value" >"$lock" || true
+}
+
+lock_stopped_legion_fans() {
+    # Disabling the experiment is itself a safety rollback: do not leave a
+    # zero-RPM lock in place while power-saver remains selected.
+    [ "$LOCK_FANS_ON_POWER_SAVER" = 1 ] || { set_legion_fan_lock 0; return 0; }
+    legion_fans_stopped || return 0
+    set_legion_fan_lock 1
+}
+
+apply_profile() {
+    profile=$(/usr/bin/tlpctl get)
+
+    case "$profile" in
+        power-saver)
+            if [ "$MANAGE_BLUETOOTH" = 1 ]; then
+                /usr/bin/rfkill block bluetooth || true
+                /usr/bin/systemctl mask --runtime bluetooth.service || true
+                /usr/bin/systemctl stop bluetooth.service || true
+            fi
+            if [ "$MANAGE_NVIDIA_POWERD" = 1 ]; then
+                /usr/bin/systemctl mask --runtime nvidia-powerd.service || true
+                /usr/bin/systemctl stop nvidia-powerd.service || true
+            fi
+            set_nvidia_runtime_pm auto
+            remove_nvidia_gpu
+            lock_stopped_legion_fans
+            ;;
+        performance|balanced)
+            # Restore EC thermal control on every non-SAV profile. This is
+            # deliberately unconditional so a prior SAV lock cannot persist.
+            set_legion_fan_lock 0
+            restore_nvidia_gpu
+            if [ "$MANAGE_BLUETOOTH" = 1 ]; then
+                /usr/bin/systemctl unmask --runtime bluetooth.service || true
+                /usr/bin/rfkill unblock bluetooth || true
+                /usr/bin/systemctl start bluetooth.service || true
+            fi
+            if [ "$MANAGE_NVIDIA_POWERD" = 1 ]; then
+                /usr/bin/systemctl unmask --runtime nvidia-powerd.service || true
+                /usr/bin/systemctl start nvidia-powerd.service || true
+            fi
+            ;;
+        *)
+            echo "Unexpected TLP profile: $profile" >&2
+            return 1
+            ;;
+    esac
+}
+
+apply_profile
+
+while true; do
+    /usr/bin/stdbuf -oL -eL /usr/bin/gdbus monitor --system \
+        --dest org.freedesktop.UPower.PowerProfiles \
+        --object-path /org/freedesktop/UPower/PowerProfiles 2>/dev/null |
+    while IFS= read -r event; do
+        case "$event" in
+            *ActiveProfile*)
+                # tlp-pd applies kernel settings asynchronously.
+                sleep 2
+                apply_profile
+                ;;
+        esac
+    done
+
+    sleep 1
+    apply_profile
+done

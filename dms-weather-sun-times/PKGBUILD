@@ -1,0 +1,32 @@
+# Maintainer: Steven <steven@localhost>
+
+pkgname=dms-weather-sun-times
+pkgver=1.1.0
+pkgrel=2
+pkgdesc="Toggleable sunrise/sunset timeline for the DMS weather sky chart"
+arch=('any')
+url="https://github.com/AvengeMedia/DankMaterialShell"
+license=('MIT')
+depends=('dms-shell>=1.5.3' 'patch')
+install=dms-weather-sun-times.install
+source=('dms-weather-sun-times'
+        '95-dms-weather-sun-times.hook'
+        'dms-weather-sun-times.install'
+        '0001-weather-sky-times-and-settings.patch'
+        'LICENSE')
+sha256sums=('ead387ca0efc2dcfc42c465fd8672c1c0e42c22483a74006c93305219e6f89de'
+            '526ebcadd989bb7cab79624bc11fca64b050c54213b6434da0ea33e504dcf5aa'
+            '8f3b0f21814edd225751b14e47d9be4030846becac6c14124e9bc0f5ce8549f7'
+            '14683a15f3b8b5c1bdf9ff30ca2083e64a94b04493494f9703aae71f68d9457f'
+            '92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86')
+
+package() {
+    install -Dm755 "$srcdir/dms-weather-sun-times" \
+        "$pkgdir/usr/lib/dms-weather-sun-times/apply"
+    install -Dm644 "$srcdir/95-dms-weather-sun-times.hook" \
+        "$pkgdir/usr/share/libalpm/hooks/95-dms-weather-sun-times.hook"
+    install -Dm644 "$srcdir/0001-weather-sky-times-and-settings.patch" \
+        "$pkgdir/usr/share/dms-weather-sun-times/0001-weather-sky-times-and-settings.patch"
+    install -Dm644 "$srcdir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

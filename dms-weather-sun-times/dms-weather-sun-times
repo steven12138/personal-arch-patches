@@ -1,0 +1,70 @@
+#!/bin/sh
+
+set -u
+
+patch_file=/usr/share/dms-weather-sun-times/0001-weather-sky-times-and-settings.patch
+weather_tab=/usr/share/quickshell/dms/Modules/DankDash/WeatherTab.qml
+weather_service=/usr/share/quickshell/dms/Services/WeatherService.qml
+settings_data=/usr/share/quickshell/dms/Common/SettingsData.qml
+settings_spec=/usr/share/quickshell/dms/Common/settings/SettingsSpec.js
+settings_tab=/usr/share/quickshell/dms/Modules/Settings/TimeWeatherTab.qml
+mode=${1:---apply}
+
+case "$mode" in
+    --apply|--check|--remove)
+        ;;
+    *)
+        echo "Usage: $0 [--apply|--check|--remove]" >&2
+        exit 2
+        ;;
+esac
+
+for target in "$weather_tab" "$weather_service" "$settings_data" "$settings_spec" "$settings_tab"; do
+    if [ ! -f "$target" ]; then
+        echo "dms-weather-sun-times: ERROR: missing DMS file: $target" >&2
+        exit 1
+    fi
+done
+
+is_applied() {
+    /usr/bin/grep -Fq 'id: sunTimeline' "$weather_tab" &&
+        /usr/bin/grep -Fq 'function getSunTimeline(date, points = 96)' "$weather_service" &&
+        /usr/bin/grep -Fq 'property bool weatherSkyUseTimeline' "$settings_data" &&
+        /usr/bin/grep -Fq 'weatherSkyFollowCurrentTime: { def: true }' "$settings_spec" &&
+        /usr/bin/grep -Fq 'settingKey: "weatherSkyUseTimeline"' "$settings_tab"
+}
+
+if [ "$mode" = "--remove" ]; then
+    if ! is_applied; then
+        echo "dms-weather-sun-times: patch is already absent"
+        exit 0
+    fi
+    if /usr/bin/patch --silent --reverse --batch --directory=/ --strip=1 < "$patch_file"; then
+        echo "dms-weather-sun-times: removed weather sky-time patch"
+        exit 0
+    fi
+    echo "dms-weather-sun-times: ERROR: could not remove weather sky-time patch" >&2
+    exit 1
+fi
+
+if is_applied; then
+    echo "dms-weather-sun-times: weather sky-time patch is present"
+    exit 0
+fi
+
+if ! /usr/bin/patch --dry-run --silent --forward --batch --directory=/ --strip=1 < "$patch_file"; then
+    echo "dms-weather-sun-times: ERROR: installed DMS version is incompatible or partially patched" >&2
+    exit 1
+fi
+
+if [ "$mode" = "--check" ]; then
+    echo "dms-weather-sun-times: weather sky-time patch is pending" >&2
+    exit 1
+fi
+
+if /usr/bin/patch --silent --forward --batch --directory=/ --strip=1 < "$patch_file"; then
+    echo "dms-weather-sun-times: applied weather sky-time patch"
+    exit 0
+fi
+echo "dms-weather-sun-times: ERROR: could not apply weather sky-time patch" >&2
+exit 1

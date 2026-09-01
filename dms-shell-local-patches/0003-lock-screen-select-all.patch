@@ -1,0 +1,167 @@
+--- a/usr/share/quickshell/dms/Modules/Lock/LockScreenContent.qml
++++ b/usr/share/quickshell/dms/Modules/Lock/LockScreenContent.qml
+@@ -826,6 +826,7 @@
+ 
+                         readonly property string text: root.passwordBuffer
+                         property int cursorPosition: text.length
++                        property bool allSelected: false
+ 
+                         signal accepted
+ 
+@@ -834,13 +835,33 @@
+                         }
+ 
+                         function clear() {
++                            allSelected = false;
+                             root.passwordEdited("");
+                             cursorPosition = 0;
+                         }
+ 
++                        function selectAll() {
++                            clampCursorPosition();
++                            allSelected = text.length > 0;
++                            cursorPosition = text.length;
++                        }
++
++                        function deleteSelection() {
++                            if (!allSelected)
++                                return false;
++                            clear();
++                            return true;
++                        }
++
+                         function insertText(value) {
+                             if (value.length === 0)
+                                 return;
++                            if (allSelected) {
++                                allSelected = false;
++                                root.passwordEdited(value);
++                                cursorPosition = value.length;
++                                return;
++                            }
+                             clampCursorPosition();
+                             const pos = cursorPosition;
+                             root.passwordEdited(text.slice(0, pos) + value + text.slice(pos));
+@@ -848,6 +869,8 @@
+                         }
+ 
+                         function backspace() {
++                            if (deleteSelection())
++                                return;
+                             clampCursorPosition();
+                             if (cursorPosition === 0)
+                                 return;
+@@ -857,6 +880,8 @@
+                         }
+ 
+                         function deleteForward() {
++                            if (deleteSelection())
++                                return;
+                             clampCursorPosition();
+                             if (cursorPosition === text.length)
+                                 return;
+@@ -866,6 +891,8 @@
+                         }
+ 
+                         function deleteToLineStart() {
++                            if (deleteSelection())
++                                return;
+                             clampCursorPosition();
+                             if (cursorPosition === 0)
+                                 return;
+@@ -874,6 +901,8 @@
+                         }
+ 
+                         function deleteToLineEnd() {
++                            if (deleteSelection())
++                                return;
+                             clampCursorPosition();
+                             if (cursorPosition === text.length)
+                                 return;
+@@ -881,6 +910,8 @@
+                         }
+ 
+                         function deleteWordBackward() {
++                            if (deleteSelection())
++                                return;
+                             clampCursorPosition();
+                             if (cursorPosition === 0)
+                                 return;
+@@ -961,19 +992,22 @@
+                             if ((event.modifiers & Qt.ControlModifier) && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) {
+                                 switch (event.key) {
+                                 case Qt.Key_A:
+-                                    cursorPosition = 0;
++                                    selectAll();
+                                     event.accepted = true;
+                                     return;
+                                 case Qt.Key_E:
++                                    allSelected = false;
+                                     cursorPosition = text.length;
+                                     event.accepted = true;
+                                     return;
+                                 case Qt.Key_B:
++                                    allSelected = false;
+                                     clampCursorPosition();
+                                     cursorPosition = Math.max(0, cursorPosition - 1);
+                                     event.accepted = true;
+                                     return;
+                                 case Qt.Key_F:
++                                    allSelected = false;
+                                     clampCursorPosition();
+                                     cursorPosition = Math.min(text.length, cursorPosition + 1);
+                                     event.accepted = true;
+@@ -1016,20 +1050,24 @@
+                                 event.accepted = true;
+                                 return;
+                             case Qt.Key_Left:
++                                allSelected = false;
+                                 clampCursorPosition();
+                                 cursorPosition = Math.max(0, cursorPosition - 1);
+                                 event.accepted = true;
+                                 return;
+                             case Qt.Key_Right:
++                                allSelected = false;
+                                 clampCursorPosition();
+                                 cursorPosition = Math.min(text.length, cursorPosition + 1);
+                                 event.accepted = true;
+                                 return;
+                             case Qt.Key_Home:
++                                allSelected = false;
+                                 cursorPosition = 0;
+                                 event.accepted = true;
+                                 return;
+                             case Qt.Key_End:
++                                allSelected = false;
+                                 cursorPosition = text.length;
+                                 event.accepted = true;
+                                 return;
+@@ -1124,6 +1162,19 @@
+                         }
+                     }
+ 
++                    Rectangle {
++                        id: passwordSelection
++
++                        // Short passwords are left-aligned, so the highlight starts at the text item origin.
++                        x: passwordDisplay.x
++                        anchors.verticalCenter: parent.verticalCenter
++                        width: Math.min(passwordDisplay.implicitWidth, passwordDisplay.width)
++                        height: passwordDisplay.font.pixelSize + Theme.spacingXS
++                        radius: Math.min(Theme.cornerRadius, 4)
++                        color: Theme.primaryContainer
++                        visible: !demoMode && passwordField.allSelected && root.passwordBuffer.length > 0
++                    }
++
+                     StyledText {
+                         id: passwordDisplay
+ 
+@@ -1168,7 +1219,7 @@
+                         x: passwordDisplay.x + passwordCursorMetrics.advanceWidth + Math.min(0, passwordDisplay.width - passwordDisplay.implicitWidth)
+                         anchors.verticalCenter: parent.verticalCenter
+                         height: passwordDisplay.font.pixelSize + 4
+-                        shown: !demoMode && passwordField.activeFocus && !pam.passwd.active && !pam.u2fPending && !root.unlocking
++                        shown: !demoMode && passwordField.activeFocus && !passwordField.allSelected && !pam.passwd.active && !pam.u2fPending && !root.unlocking
+ 
+                         Connections {
+                             target: passwordField

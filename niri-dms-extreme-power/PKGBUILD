@@ -1,0 +1,83 @@
+# Maintainer: Steven <steven@localhost>
+
+pkgname=niri-dms-extreme-power
+pkgver=1.1.1
+pkgrel=5
+pkgdesc="Machine-specific extreme TLP policy and niri/DMS power integration"
+arch=('any')
+url="https://linrunner.de/tlp/"
+license=('MIT')
+depends=(
+    'brightnessctl'
+    'glib2'
+    'kmod'
+    'niri'
+    'systemd'
+    'tlp>=1.10'
+    'tlp-pd>=1.10'
+    'util-linux'
+)
+optdepends=(
+    'bluez: disable and restore Bluetooth with the active profile'
+    'dms-shell: graphical PowerProfiles controls'
+    'nvidia-utils: stop and restore nvidia-powerd with the active profile'
+)
+install=niri-dms-extreme-power.install
+backup=(
+    'etc/niri-dms-extreme-power.conf'
+    'etc/tlp.d/99-extreme-powersave.conf'
+)
+source=(
+    '99-extreme-powersave.conf'
+    'niri-dms-extreme-power.conf'
+    'niri-power-refresh'
+    'niri-dms-power-system'
+    'prepare-niri-gpu'
+    '30-extreme-power-gpu.conf'
+    'niri-dms-extreme-power.service'
+    '99-niri-dms-extreme-power.rules'
+    'niri-dms-extreme-power.desktop'
+    'niri-dms-extreme-power.install'
+    'README.md'
+    'LICENSE'
+)
+sha256sums=('e075ecbf047e1a0f3e505275be38193aec439d31353480aa4827cdc7cf0d7985'
+            'ff06ca6838e71d6d97a17efa4e0a634055911f51fbf20c3b5b5d28ee07d8c29f'
+            'db3fd59dd1945578a67addfdddb56a566fc7faecfdb1b1ae7001a29fed4b7c68'
+            '95b78abdc4282e5c2c1c20b9f40a89e3877ca2e33c01047052b9c91e8eb2963d'
+            '26d00d2bfbb85535f0645aa6c4324c29c20ca1e94cea653231052b4314d91d30'
+            '70715930661c3837bebee21a399e62af158495690ca5e553d13035af1631e7fa'
+            '0ff5c3d974d58ffeaf3b171fa5a166273e19ee117687687fc7a677d4188b58c9'
+            'd0d0e4082c4484a4f1a367bba37b50fb1e5097a56cd51ec0a7c9ce6e9637fbfd'
+            'bf3f4b84d6e01593a2b901262ca5dc40a72c2207220f6de9b3346988f1d4d44a'
+            '40cd3ae1ac991dd6b04703ee5c26f4af96f4b6da0ca7eb131b47ef5550e8669b'
+            'a983d92cb30d47ad8d66b3cf5e2e4ac97bd262282c2de4214812d8ffb8eaf736'
+            '92d2adec8e63eea904d4cecafe2e188fad710a823a2be2a4e93d876be5628c86')
+
+package() {
+    install -Dm644 "$srcdir/99-extreme-powersave.conf" \
+        "$pkgdir/etc/tlp.d/99-extreme-powersave.conf"
+    install -Dm644 "$srcdir/niri-dms-extreme-power.conf" \
+        "$pkgdir/etc/niri-dms-extreme-power.conf"
+
+    install -Dm755 "$srcdir/niri-power-refresh" \
+        "$pkgdir/usr/bin/niri-power-refresh"
+    install -Dm755 "$srcdir/niri-dms-power-system" \
+        "$pkgdir/usr/lib/niri-dms-extreme-power/apply-system-profile"
+    install -Dm755 "$srcdir/prepare-niri-gpu" \
+        "$pkgdir/usr/lib/niri-dms-extreme-power/prepare-niri-gpu"
+    install -Dm644 "$srcdir/30-extreme-power-gpu.conf" \
+        "$pkgdir/usr/lib/systemd/user/niri.service.d/30-extreme-power-gpu.conf"
+
+    install -Dm644 "$srcdir/niri-dms-extreme-power.service" \
+        "$pkgdir/usr/lib/systemd/system/niri-dms-extreme-power.service"
+    install -Dm644 "$srcdir/99-niri-dms-extreme-power.rules" \
+        "$pkgdir/usr/lib/udev/rules.d/99-niri-dms-extreme-power.rules"
+    install -Dm644 "$srcdir/niri-dms-extreme-power.desktop" \
+        "$pkgdir/etc/xdg/autostart/niri-dms-extreme-power.desktop"
+
+    install -Dm644 "$srcdir/README.md" \
+        "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 "$srcdir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

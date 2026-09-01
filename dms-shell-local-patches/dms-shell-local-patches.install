@@ -1,0 +1,17 @@
+run_dms_patch_manager() {
+    if ! /usr/lib/dms-shell-local-patches/apply --apply; then
+        echo "dms-shell-local-patches: WARNING: at least one patch needs manual review"
+    fi
+}
+
+post_install() {
+    run_dms_patch_manager
+}
+
+post_upgrade() {
+    run_dms_patch_manager
+}
+
+post_remove() {
+    echo "dms-shell-local-patches: reinstall dms-shell to restore pristine upstream QML files"
+}

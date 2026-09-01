@@ -1,0 +1,12 @@
+--- a/usr/share/quickshell/dms/Modules/Lock/LockScreenContent.qml
++++ b/usr/share/quickshell/dms/Modules/Lock/LockScreenContent.qml
+@@ -1165,7 +1165,8 @@
+                     Rectangle {
+                         id: passwordSelection
+ 
+-                        x: passwordDisplay.x + Math.max(0, passwordDisplay.width - passwordDisplay.implicitWidth)
++                        // Short passwords are left-aligned, so the highlight starts at the text item origin.
++                        x: passwordDisplay.x
+                         anchors.verticalCenter: parent.verticalCenter
+                         width: Math.min(passwordDisplay.implicitWidth, passwordDisplay.width)
+                         height: passwordDisplay.font.pixelSize + Theme.spacingXS

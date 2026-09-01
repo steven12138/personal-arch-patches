@@ -1,0 +1,46 @@
+# Maintainer: Steven <steven@localhost>
+
+pkgname=xwayland-satellite-dnd-fix
+pkgver=0.8.2.r5.g6d0de1c
+pkgrel=2
+pkgdesc='xwayland-satellite with copy-only Wayland-to-X11 XDND and stale clipboard fixes'
+arch=('x86_64')
+url='https://github.com/Supreeeme/xwayland-satellite'
+license=('MPL-2.0' 'GPL-2.0-or-later')
+depends=('glibc' 'libgcc' 'libxcb' 'xcb-util-cursor' 'xorg-xwayland')
+makedepends=('cargo' 'clang' 'git')
+provides=('xwayland-satellite=0.8.2')
+conflicts=('xwayland-satellite')
+_commit=6d0de1cedde9dc02abb8877d1b04b90a8c22c3d0
+source=(
+  "xwayland-satellite::git+https://github.com/Supreeeme/xwayland-satellite.git#commit=${_commit}"
+  '0001-add-copy-only-xdnd-and-fix-stale-selections.patch'
+)
+sha256sums=(
+  'SKIP'
+  '174c7bb2a81b82d28bada4a69aac2e56c91f4eed3c5b646dc04b26c73cd6d45c'
+)
+
+prepare() {
+  cd xwayland-satellite
+  patch -Np1 -i "${srcdir}/0001-add-copy-only-xdnd-and-fix-stale-selections.patch"
+  sed -i 's|ExecStart=/usr/local/bin/|ExecStart=/usr/bin/|' resources/xwayland-satellite.service
+}
+
+build() {
+  cd xwayland-satellite
+  cargo build --frozen --release --features systemd
+}
+
+check() {
+  cd xwayland-satellite
+  cargo test --frozen --no-fail-fast
+}
+
+package() {
+  cd xwayland-satellite
+  install -Dm755 target/release/xwayland-satellite "${pkgdir}/usr/bin/xwayland-satellite"
+  install -Dm644 resources/xwayland-satellite.service \
+    "${pkgdir}/usr/lib/systemd/user/xwayland-satellite.service"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MPL-2.0"
+}

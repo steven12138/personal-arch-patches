@@ -1,0 +1,21 @@
+--- a/usr/bin/niri-session
++++ b/usr/bin/niri-session
+@@ -33,6 +33,16 @@
+     systemctl --user reset-failed
+ 
+-    # Import the login manager environment.
+-    systemctl --user import-environment
++    # Import the login manager environment. systemd warns when this command
++    # is called without a variable list, so pass the names actually present in
++    # this login environment. Keep the list explicit so values containing
++    # terminal control sequences cannot produce additional warnings.
++    systemctl --user import-environment \
++        ${DISPLAY:+DISPLAY} ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY} \
++        ${XDG_SESSION_TYPE:+XDG_SESSION_TYPE} \
++        ${XDG_CURRENT_DESKTOP:+XDG_CURRENT_DESKTOP} \
++        ${NIRI_SOCKET:+NIRI_SOCKET} \
++        ${DBUS_SESSION_BUS_ADDRESS:+DBUS_SESSION_BUS_ADDRESS} \
++        ${XDG_SESSION_ID:+XDG_SESSION_ID} \
++        ${XDG_SESSION_CLASS:+XDG_SESSION_CLASS} ${XDG_SEAT:+XDG_SEAT}
+ 
+     # DBus activation environment is independent from systemd. While most of

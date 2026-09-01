@@ -1,0 +1,12 @@
+[Unit]
+Description=Synchronize system devices with the active TLP profile
+After=dbus.service tlp.service tlp-pd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/niri-dms-extreme-power/apply-system-profile
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=tlp-pd.service
