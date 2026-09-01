@@ -45,7 +45,6 @@ done
 - `dms-spotlight-translate` — DMS Spotlight translation provider.
 - `dms-weather-sun-times` — DMS weather/sun-times patch.
 - `niri-dms-extreme-power` — niri/DMS TLP power-profile integration.
-- `niri-session-env-fix` — niri session-environment launcher fix.
 - `wechat-universal-notify` — native notifications and activation for WeChat
   Universal.
 - `xwayland-satellite-dnd-fix` — XWayland Satellite XDND fix. It provides and
