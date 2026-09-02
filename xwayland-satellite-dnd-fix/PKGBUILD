@@ -1,9 +1,9 @@
 # Maintainer: Steven <steven@localhost>
 
 pkgname=xwayland-satellite-dnd-fix
-pkgver=0.8.2.r5.g6d0de1c
-pkgrel=3
-pkgdesc='xwayland-satellite main branch with copy-only Wayland-to-X11 XDND and stale clipboard fixes'
+pkgver=0.8.2.r9.g78e4e01
+pkgrel=1
+pkgdesc='xwayland-satellite main branch with copy-only XDND and reliable clipboard ownership'
 arch=('x86_64')
 url='https://github.com/Supreeeme/xwayland-satellite'
 license=('MPL-2.0' 'GPL-2.0-or-later')
@@ -14,10 +14,12 @@ conflicts=('xwayland-satellite')
 source=(
   'xwayland-satellite::git+https://github.com/Supreeeme/xwayland-satellite.git'
   '0001-add-copy-only-xdnd-and-fix-stale-selections.patch'
+  '0002-ignore-stale-x11-selection-owner-destroy.patch'
 )
 sha256sums=(
   'SKIP'
   '174c7bb2a81b82d28bada4a69aac2e56c91f4eed3c5b646dc04b26c73cd6d45c'
+  'SKIP'
 )
 
 pkgver() {
@@ -29,6 +31,7 @@ pkgver() {
 prepare() {
   cd xwayland-satellite
   patch -Np1 -i "${srcdir}/0001-add-copy-only-xdnd-and-fix-stale-selections.patch"
+  patch -Np1 -i "${srcdir}/0002-ignore-stale-x11-selection-owner-destroy.patch"
   sed -i 's|ExecStart=/usr/local/bin/|ExecStart=/usr/bin/|' resources/xwayland-satellite.service
 }
 

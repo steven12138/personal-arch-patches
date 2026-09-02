@@ -30,6 +30,9 @@ changes cannot silently bypass or alter the DND fix.
 - Handles XDND v2-v5 completion semantics and target destruction safely.
 - Lets a new Wayland clipboard/primary offer replace a stale X11-owned source.
 - Clears the correct selection when an X11 owner closes or is destroyed.
+- Ignores a stale X11-owner-destroy event when a newer X11 owner has already
+  claimed the selection, so an exiting `cpsend`/`xclip` process cannot erase a
+  newer WeChat clipboard write.
 
 This directly targets Files/Nautilus (native Wayland) -> WeChat (XWayland) and
 the stale `cpsend`/`xclip` clipboard owner masking a newer Wayland image. It does

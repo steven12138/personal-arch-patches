@@ -1,0 +1,90 @@
+--- a/src/xstate/selection.rs
++++ b/src/xstate/selection.rs
+@@ -30,6 +30,7 @@
+     mimes: Vec<SelectionTargetId>,
+     connection: Rc<xcb::Connection>,
+     window: x::Window,
++    owner: x::Window,
+     pending: RefCell<VecDeque<PendingSelectionData>>,
+     selection: x::Atom,
+     selection_time: u32,
+@@ -295,6 +296,7 @@
+     atom: x::Atom,
+     targets_atom: x::Atom,
+     current_selection: Option<CurrentSelection<T>>,
++    pending_owner: Option<x::Window>,
+ }
+ 
+ // This is a trait so that we can use &dyn
+@@ -318,6 +320,7 @@
+         server_state: &mut RealServerState,
+     );
+     fn x11_selection(&self) -> Option<&Selection>;
++    fn x11_owner(&self) -> Option<x::Window>;
+     fn handle_selection_request(
+         &mut self,
+         connection: &xcb::Connection,
+@@ -337,6 +340,7 @@
+             atom,
+             targets_atom,
+             current_selection: None,
++            pending_owner: None,
+         }
+     }
+     fn wayland_selection_mut(&mut self) -> Option<&mut WaylandSelection<T>> {
+@@ -412,6 +416,7 @@
+                     get_atom_name(connection, self.atom)
+                 );
+                 self.last_selection_timestamp = timestamp;
++                self.pending_owner = Some(owner);
+             }
+             Err(e) => warn!(
+                 "could not set new {} owner: {e:?}",
+@@ -503,6 +508,7 @@
+             mimes,
+             connection: connection.clone(),
+             window: target_window,
++            owner: self.pending_owner.take().unwrap_or(x::WINDOW_NONE),
+             pending: RefCell::default(),
+             selection: self.atom,
+             selection_time: self.last_selection_timestamp,
+@@ -521,6 +527,13 @@
+         }
+     }
+ 
++    fn x11_owner(&self) -> Option<x::Window> {
++        match &self.current_selection {
++            Some(CurrentSelection::X11(selection)) => Some(selection.owner),
++            _ => None,
++        }
++    }
++
+     fn handle_selection_request(
+         &mut self,
+         connection: &xcb::Connection,
+@@ -919,13 +932,20 @@
+                     }
+                     xcb::xfixes::SelectionEvent::SelectionClientClose
+                     | xcb::xfixes::SelectionEvent::SelectionWindowDestroy => {
+-                        debug!("Selection owner destroyed, selection will be unset");
+                         if x == self.atoms.clipboard {
+-                            self.selection_state.clipboard.current_selection = None;
+-                            server_state.clear_x11_selection_source::<Clipboard>();
++                            if self.selection_state.clipboard.x11_owner() == Some(e.owner()) {
++                                debug!(
++                                    "Current clipboard owner destroyed, selection will be unset"
++                                );
++                                self.selection_state.clipboard.current_selection = None;
++                                server_state.clear_x11_selection_source::<Clipboard>();
++                            }
+                         } else {
+-                            self.selection_state.primary.current_selection = None;
+-                            server_state.clear_x11_selection_source::<Primary>();
++                            if self.selection_state.primary.x11_owner() == Some(e.owner()) {
++                                debug!("Current primary owner destroyed, selection will be unset");
++                                self.selection_state.primary.current_selection = None;
++                                server_state.clear_x11_selection_source::<Primary>();
++                            }
+                         }
+                     }
+                 },
