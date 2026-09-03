@@ -47,8 +47,9 @@ done
 | `dms-spotlight-translate` | A DMS Spotlight plugin backed by `translate-shell`: `> hello` translates to Chinese, `> 你好` to English, and Enter copies the result. | You want quick Chinese/English translation from the DMS launcher. |
 | `dms-weather-sun-times` | A DMS patch and reapply hook that adds a toggleable sunrise/sunset timeline to the Weather sky chart. | You use DMS Weather and want daylight times in its graph. |
 | `niri-dms-extreme-power` | The machine-specific TLP/DMS policy: low-power and performance CPU/GPU limits, display refresh/brightness changes, D-Bus profile watcher, Bluetooth/NVIDIA power handling, and guarded Legion zero-RPM fan locking in Power Saver. | You have the matching Legion/niri setup and want DMS Power Profiles to control this whole policy. |
+| `niri-xwayland-dnd-fix` | A replacement for Arch's `niri`, paired with the exact Smithay revision used by niri 26.04. It identifies the on-demand satellite through a dedicated Wayland socket and lets an X11 drag retain pointer motion while native Wayland targets receive the data offer. | You need X11 -> Wayland drag-and-drop; install it together with `xwayland-satellite-dnd-fix` and log out/in. |
 | `wechat-universal-notify` | A user service that watches WeChat Universal's encrypted message database and sends native Linux notifications. Its default action focuses an existing WeChat window, then tries tray activation, then starts WeChat if needed. | You run `wechat-universal-bwrap` and want native notifications plus reliable notification-click activation. |
-| `xwayland-satellite-dnd-fix` | A replacement for the distribution `xwayland-satellite`. It follows upstream `main` on rebuild and applies a copy-only Wayland-to-X11 XDND and stale-clipboard patch, primarily for native Files/Nautilus to XWayland WeChat drag-and-drop. It conflicts with `xwayland-satellite`; log out and back in after changing it. | You need that specific XWayland drag-and-drop/clipboard fix and accept replacing the distro package. |
+| `xwayland-satellite-dnd-fix` | A replacement for the distribution `xwayland-satellite`. It tracks upstream `main` and adds bidirectional Wayland/X11 XDND, Copy/Move negotiation, multiple MIME types, large INCR transfers, proxy routing over native surfaces, and isolated DND state so the upstream clipboard path stays intact. | You need drag-and-drop between native Wayland apps and XWayland apps such as WeChat; pair it with `niri-xwayland-dnd-fix` for the X11 -> Wayland direction. |
 
 ## Updating
 
@@ -63,3 +64,14 @@ yay -Bi niri-dms-extreme-power
 
 Before trusting a package, inspect its `PKGBUILD`, `.SRCINFO`, and patch files.
 These packages are machine-specific local patches, not official Arch packages.
+
+For the paired XDND packages, check the newest niri tag, its exact Smithay
+revision, and satellite `main` without changing the package files:
+
+```sh
+./scripts/check-xdnd-upstream.sh
+```
+
+A failed dry-run means upstream changed the touched code and the patches need a
+review. A successful dry-run is only the first gate; rebuild both packages and
+run their tests before bumping the pinned niri/Smithay pair.

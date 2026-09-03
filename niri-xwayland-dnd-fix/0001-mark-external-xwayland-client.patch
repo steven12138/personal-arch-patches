@@ -1,0 +1,253 @@
+diff --git a/src/dbus/mutter_service_channel.rs b/src/dbus/mutter_service_channel.rs
+index e226acb..feebdb0 100644
+--- a/src/dbus/mutter_service_channel.rs
++++ b/src/dbus/mutter_service_channel.rs
+@@ -27,6 +27,7 @@ impl ServiceChannel {
+             restricted: false,
+             // FIXME: maybe you can get the PID from D-Bus somehow?
+             credentials_unknown: true,
++            xwayland_satellite: false,
+         };
+         if let Err(err) = self.to_niri.send(client) {
+             warn!("error sending message to niri: {err:?}");
+diff --git a/src/handlers/mod.rs b/src/handlers/mod.rs
+index 3532078..fad9262 100644
+--- a/src/handlers/mod.rs
++++ b/src/handlers/mod.rs
+@@ -75,7 +75,7 @@ use smithay::{
+ pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
+ use crate::layout::workspace::WorkspaceId;
+ use crate::layout::ActivateWindow;
+-use crate::niri::{DndIcon, NewClient, State};
++use crate::niri::{ClientState, DndIcon, NewClient, State};
+ use crate::protocols::ext_workspace::{self, ExtWorkspaceHandler, ExtWorkspaceManagerState};
+ use crate::protocols::foreign_toplevel::{
+     self, ForeignToplevelHandler, ForeignToplevelManagerState,
+@@ -332,8 +332,25 @@ impl WaylandDndGrabHandler for State {
+             dnd::GrabType::Pointer => {
+                 let pointer = seat.get_pointer().unwrap();
+                 let start_data = pointer.grab_start_data().unwrap();
+-                let grab =
+-                    DnDGrab::new_pointer(&self.niri.display_handle, start_data, source, seat);
++                let is_satellite = start_data
++                    .focus
++                    .as_ref()
++                    .and_then(|(focus, _)| focus.client())
++                    .is_some_and(|client| {
++                        client
++                            .get_data::<ClientState>()
++                            .is_some_and(|data| data.xwayland_satellite)
++                    });
++                let grab = if is_satellite {
++                    DnDGrab::new_pointer_with_source_focus(
++                        &self.niri.display_handle,
++                        start_data,
++                        source,
++                        seat,
++                    )
++                } else {
++                    DnDGrab::new_pointer(&self.niri.display_handle, start_data, source, seat)
++                };
+                 pointer.set_grab(self, grab, serial, Focus::Keep);
+             }
+             dnd::GrabType::Touch => {
+@@ -507,6 +524,7 @@ impl SecurityContextHandler for State {
+                     client,
+                     restricted: true,
+                     credentials_unknown: false,
++                    xwayland_satellite: false,
+                 });
+             })
+             .unwrap();
+diff --git a/src/niri.rs b/src/niri.rs
+index ec40e01..b0a5b4e 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -2440,6 +2440,7 @@ impl Niri {
+                         client,
+                         restricted: false,
+                         credentials_unknown: false,
++                        xwayland_satellite: false,
+                     });
+                 })
+                 .unwrap();
+@@ -2637,6 +2638,7 @@ impl Niri {
+             client,
+             restricted,
+             credentials_unknown,
++            xwayland_satellite,
+         } = client;
+ 
+         let config = self.config.borrow();
+@@ -2646,6 +2648,7 @@ impl Niri {
+             primary_selection_disabled: config.clipboard.disable_primary,
+             restricted,
+             credentials_unknown,
++            xwayland_satellite,
+         });
+ 
+         if let Err(err) = self.display_handle.insert_client(client, data) {
+@@ -6463,6 +6466,7 @@ pub struct NewClient {
+     pub client: UnixStream,
+     pub restricted: bool,
+     pub credentials_unknown: bool,
++    pub xwayland_satellite: bool,
+ }
+ 
+ pub struct ClientState {
+@@ -6473,6 +6477,8 @@ pub struct ClientState {
+     pub restricted: bool,
+     /// We cannot retrieve this client's socket credentials.
+     pub credentials_unknown: bool,
++    /// This client is the compositor-side connection used by xwayland-satellite.
++    pub xwayland_satellite: bool,
+ }
+ 
+ impl ClientData for ClientState {
+diff --git a/src/tests/fixture.rs b/src/tests/fixture.rs
+index e57ef21..082e508 100644
+--- a/src/tests/fixture.rs
++++ b/src/tests/fixture.rs
+@@ -101,6 +101,7 @@ impl Fixture {
+             client: sock1,
+             restricted: false,
+             credentials_unknown: false,
++            xwayland_satellite: false,
+         });
+ 
+         let client = Client::new(sock2);
+diff --git a/src/utils/xwayland/satellite.rs b/src/utils/xwayland/satellite.rs
+index 0a4e8f0..fb255e8 100644
+--- a/src/utils/xwayland/satellite.rs
++++ b/src/utils/xwayland/satellite.rs
+@@ -1,5 +1,5 @@
+ use std::os::fd::{AsRawFd as _, BorrowedFd, OwnedFd};
+-use std::os::unix::net::UnixListener;
++use std::os::unix::net::{UnixListener, UnixStream};
+ use std::os::unix::process::CommandExt as _;
+ use std::path::{Path, PathBuf};
+ use std::process::{Command, Stdio};
+@@ -10,7 +10,7 @@ use calloop::generic::Generic;
+ use calloop::{Interest, Mode, PostAction, RegistrationToken};
+ use smithay::reexports::rustix::io::{fcntl_setfd, FdFlags};
+ 
+-use crate::niri::State;
++use crate::niri::{NewClient, State};
+ use crate::utils::expand_home;
+ use crate::utils::xwayland::X11Connection;
+ 
+@@ -179,7 +179,10 @@ fn setup_watch(state: &mut State) {
+ 
+                     debug!("connection to X11 abstract socket; spawning xwayland-satellite");
+                     let path = state.niri.config.borrow().xwayland_satellite.path.clone();
+-                    spawn(path, satellite);
++                    let client = spawn(path, satellite);
++                    if let Some(client) = client {
++                        state.niri.insert_client(client);
++                    }
+                 }
+                 Ok(PostAction::Remove)
+             })
+@@ -202,7 +205,10 @@ fn setup_watch(state: &mut State) {
+ 
+                 debug!("connection to X11 unix socket; spawning xwayland-satellite");
+                 let path = state.niri.config.borrow().xwayland_satellite.path.clone();
+-                spawn(path, satellite);
++                let client = spawn(path, satellite);
++                if let Some(client) = client {
++                    state.niri.insert_client(client);
++                }
+             }
+             Ok(PostAction::Remove)
+         })
+@@ -210,7 +216,7 @@ fn setup_watch(state: &mut State) {
+     satellite.unix_token = Some(token);
+ }
+ 
+-fn spawn(path: String, xwl: &Satellite) {
++fn spawn(path: String, xwl: &Satellite) -> Option<NewClient> {
+     let _span = tracy_client::span!("satellite::spawn");
+ 
+     let abstract_fd = xwl
+@@ -220,6 +226,14 @@ fn spawn(path: String, xwl: &Satellite) {
+         .map(|fd| fd.try_clone().unwrap());
+     let unix_fd = xwl.x11.unix_fd.try_clone().unwrap();
+     let to_main = xwl.to_main.clone();
++    let (wayland_server, wayland_client) = match UnixStream::pair() {
++        Ok(pair) => pair,
++        Err(err) => {
++            warn!("error creating xwayland-satellite Wayland socket pair: {err:?}");
++            return None;
++        }
++    };
++    let wayland_raw = wayland_client.as_raw_fd();
+ 
+     // Expand `~` at the start.
+     let mut path = PathBuf::from(path);
+@@ -233,7 +247,10 @@ fn spawn(path: String, xwl: &Satellite) {
+     }
+ 
+     let mut process = Command::new(&path);
+-    process.arg(&xwl.x11.display_name).env_remove("DISPLAY");
++    process
++        .arg(&xwl.x11.display_name)
++        .env_remove("DISPLAY")
++        .env("WAYLAND_SOCKET", wayland_raw.to_string());
+ 
+     // We don't want it spamming the niri output.
+     process
+@@ -250,7 +267,7 @@ fn spawn(path: String, xwl: &Satellite) {
+     let res = thread::Builder::new()
+         .name("Xwl-s Spawner".to_owned())
+         .spawn(move || {
+-            spawn_and_wait(&path, process, abstract_fd, unix_fd);
++            spawn_and_wait(&path, process, abstract_fd, unix_fd, wayland_client);
+ 
+             // Once xwayland-satellite crashes or fails to spawn, re-establish our X11 socket watch
+             // to try again next time.
+@@ -260,7 +277,15 @@ fn spawn(path: String, xwl: &Satellite) {
+     if let Err(err) = res {
+         warn!("error spawning a thread to spawn xwayland-satellite: {err:?}");
+         let _ = xwl.to_main.send(ToMain::SetupWatch);
++        return None;
+     }
++
++    Some(NewClient {
++        client: wayland_server,
++        restricted: false,
++        credentials_unknown: false,
++        xwayland_satellite: true,
++    })
+ }
+ 
+ fn spawn_and_wait(
+@@ -268,9 +293,11 @@ fn spawn_and_wait(
+     mut process: Command,
+     abstract_fd: Option<OwnedFd>,
+     unix_fd: OwnedFd,
++    wayland_client: UnixStream,
+ ) {
+     let abstract_raw = abstract_fd.as_ref().map(|fd| fd.as_raw_fd());
+     let unix_raw = unix_fd.as_raw_fd();
++    let wayland_raw = wayland_client.as_raw_fd();
+ 
+     process.arg("-listenfd").arg(unix_raw.to_string());
+ 
+@@ -292,6 +319,9 @@ fn spawn_and_wait(
+                 fcntl_setfd(abstract_fd, FdFlags::empty())?;
+             }
+ 
++            let wayland_fd = BorrowedFd::borrow_raw(wayland_raw);
++            fcntl_setfd(wayland_fd, FdFlags::empty())?;
++
+             Ok(())
+         })
+     };
+@@ -310,6 +340,7 @@ fn spawn_and_wait(
+     // The process spawned, we can drop our fds.
+     drop(abstract_fd);
+     drop(unix_fd);
++    drop(wayland_client);
+ 
+     let status = match child.wait() {
+         Ok(status) => status,

@@ -1,7 +1,7 @@
 pkgbase = xwayland-satellite-dnd-fix
-	pkgdesc = xwayland-satellite main branch with copy-only XDND and reliable clipboard ownership
+	pkgdesc = xwayland-satellite main branch with bidirectional Wayland/X11 XDND
 	pkgver = 0.8.2.r9.g78e4e01
-	pkgrel = 1
+	pkgrel = 7
 	url = https://github.com/Supreeeme/xwayland-satellite
 	arch = x86_64
 	license = MPL-2.0
@@ -17,10 +17,8 @@ pkgbase = xwayland-satellite-dnd-fix
 	provides = xwayland-satellite
 	conflicts = xwayland-satellite
 	source = xwayland-satellite::git+https://github.com/Supreeeme/xwayland-satellite.git
-	source = 0001-add-copy-only-xdnd-and-fix-stale-selections.patch
-	source = 0002-ignore-stale-x11-selection-owner-destroy.patch
+	source = 0001-bidirectional-xdnd.patch
 	sha256sums = SKIP
-	sha256sums = 174c7bb2a81b82d28bada4a69aac2e56c91f4eed3c5b646dc04b26c73cd6d45c
-	sha256sums = SKIP
+	sha256sums = 9691b1919fa23bdef9f102c5b57ef5b59f98b70f4c486f33ef25f55ddbb27904
 
 pkgname = xwayland-satellite-dnd-fix

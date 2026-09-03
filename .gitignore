@@ -1,14 +1,19 @@
 # makepkg build outputs and source caches
 *.pkg.tar.*
 *.zip
+*.tar.gz
 */pkg/
 */src/
 
 # makepkg's bare cache for the xwayland-satellite git source
 xwayland-satellite-dnd-fix/xwayland-satellite/
+xwayland-satellite-dnd-fix/smithay-client-toolkit-0.20.0/
 
 # Keep the package source files, but do not nest its local Git repository.
 wechat-universal-notify/.git/
 
 # Preserved metadata from nested source repositories; not part of packages.
 .git-local/
+
+# Upstream compatibility checker scratch/output is never repository content.
+scripts/*.log

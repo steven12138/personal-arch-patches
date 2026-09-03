@@ -1,0 +1,40 @@
+pkgbase = niri-xwayland-dnd-fix
+	pkgdesc = niri with external xwayland-satellite bidirectional drag-and-drop support
+	pkgver = 26.04
+	pkgrel = 1
+	url = https://github.com/niri-wm/niri
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = clang
+	makedepends = git
+	makedepends = rust
+	depends = cairo
+	depends = glib2
+	depends = glibc
+	depends = libdisplay-info
+	depends = libgcc
+	depends = libinput
+	depends = libpipewire
+	depends = libxkbcommon
+	depends = mesa
+	depends = pango
+	depends = pixman
+	depends = seatd
+	depends = systemd-libs
+	depends = xdg-desktop-portal-impl
+	optdepends = xwayland-satellite-dnd-fix: matching bidirectional X11/Wayland DND bridge
+	optdepends = xdg-desktop-portal-gnome: screencasting portal
+	optdepends = xdg-desktop-portal-gtk: file chooser portal
+	provides = niri=26.04
+	provides = wayland-compositor
+	conflicts = niri
+	source = niri::git+https://github.com/niri-wm/niri.git#commit=8ed0da44d974c32c6877d2f4630c314da0717ecb
+	source = smithay::git+https://github.com/Smithay/smithay.git#commit=ff5fa7df392cecfba049ffed55cdaa4e98a8e7ef
+	source = 0001-mark-external-xwayland-client.patch
+	source = 0002-smithay-external-xwayland-dnd-focus.patch
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = 24537ec80c6c8ef0f19142585c01869a0a4a55e03ea88497c1c7322b3b2883b0
+	sha256sums = 011148ac6093d4fff0e8839b0e8f46bd1644b2c69dc3bfafca4efc5a90bdb8fa
+
+pkgname = niri-xwayland-dnd-fix

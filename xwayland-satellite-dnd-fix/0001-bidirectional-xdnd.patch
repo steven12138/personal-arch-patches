@@ -1,20 +1,21 @@
 diff --git a/src/lib.rs b/src/lib.rs
-index 8c27f2d..1382393 100644
+index 5c861ea..3e8c435 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -229,6 +229,10 @@ pub fn main(mut data: impl RunData) -> Option<()> {
+@@ -231,6 +231,11 @@ pub fn main(mut data: impl RunData) -> Option<()> {
          server_state.run();
          display.flush_clients().unwrap();
  
 +        for event in server_state.take_dnd_events() {
 +            xstate.handle_wayland_dnd(event);
 +        }
++        xstate.handle_x11_dnd_update(server_state.take_x11_dnd_update());
 +
          if let Some(sel) = server_state.new_selection::<Clipboard>() {
              xstate.set_clipboard(sel);
          }
 diff --git a/src/server/clientside.rs b/src/server/clientside.rs
-index 664c909..7819361 100644
+index 664c909..910f958 100644
 --- a/src/server/clientside.rs
 +++ b/src/server/clientside.rs
 @@ -6,7 +6,7 @@ use smithay_client_toolkit::{
@@ -26,7 +27,15 @@ index 664c909..7819361 100644
          data_source::DataSourceHandler,
      },
      delegate_activation, delegate_data_device, delegate_primary_selection,
-@@ -94,6 +94,7 @@ use xcb::x;
+@@ -17,6 +17,7 @@ use smithay_client_toolkit::{
+     },
+ };
+ use std::sync::{Mutex, OnceLock, mpsc};
++use wayland_client::backend::ObjectId;
+ use wayland_client::protocol::{
+     wl_buffer::WlBuffer, wl_callback::WlCallback, wl_compositor::WlCompositor,
+     wl_keyboard::WlKeyboard, wl_output::WlOutput, wl_pointer::WlPointer, wl_region::WlRegion,
+@@ -94,6 +95,7 @@ use xcb::x;
  
  pub(super) struct SelectionEvents<T> {
      pub offer: Option<T>,
@@ -34,7 +43,7 @@ index 664c909..7819361 100644
      pub requests: Vec<(
          String,
          smithay_client_toolkit::data_device_manager::WritePipe,
-@@ -105,6 +106,7 @@ impl<T> Default for SelectionEvents<T> {
+@@ -105,6 +107,7 @@ impl<T> Default for SelectionEvents<T> {
      fn default() -> Self {
          Self {
              offer: None,
@@ -42,24 +51,40 @@ index 664c909..7819361 100644
              requests: Default::default(),
              cancelled: false,
          }
-@@ -120,6 +122,7 @@ pub(super) struct MyWorld {
+@@ -120,6 +123,8 @@ pub(super) struct MyWorld {
      queued_events: Vec<mpsc::Receiver<(Entity, ObjectEvent)>>,
      pub clipboard: SelectionEvents<SelectionOffer>,
      pub primary: SelectionEvents<PrimarySelectionOffer>,
 +    pub dnd: Vec<DndEvent>,
++    pub dnd_source: DndSourceEvents,
      pub pending_activations: Vec<(xcb::x::Window, String)>,
  }
  
-@@ -134,11 +137,28 @@ impl MyWorld {
+@@ -134,11 +139,43 @@ impl MyWorld {
              queued_events: Vec::new(),
              clipboard: Default::default(),
              primary: Default::default(),
 +            dnd: Vec::new(),
++            dnd_source: Default::default(),
              pending_activations: Vec::new(),
          }
      }
  }
  
++#[derive(Default)]
++pub(super) struct DndSourceEvents {
++    pub source: Option<ObjectId>,
++    pub requests: Vec<(
++        String,
++        smithay_client_toolkit::data_device_manager::WritePipe,
++    )>,
++    pub cancelled: bool,
++    pub dropped: bool,
++    pub finished: bool,
++    pub accepted_mime: Option<Option<String>>,
++    pub action: Option<wayland_client::protocol::wl_data_device_manager::DndAction>,
++}
++
 +#[derive(Debug, Clone)]
 +pub(crate) enum DndEvent {
 +    Enter {
@@ -79,7 +104,7 @@ index 664c909..7819361 100644
  impl std::ops::Deref for MyWorld {
      type Target = World;
      fn deref(&self) -> &Self::Target {
-@@ -446,6 +466,7 @@ impl DataDeviceHandler for MyWorld {
+@@ -446,6 +483,7 @@ impl DataDeviceHandler for MyWorld {
      ) {
          let data: &DataDeviceData = data_device.data().unwrap();
          self.clipboard.offer = data.selection_offer();
@@ -87,7 +112,7 @@ index 664c909..7819361 100644
      }
  
      fn drop_performed(
-@@ -454,6 +475,7 @@ impl DataDeviceHandler for MyWorld {
+@@ -454,6 +492,7 @@ impl DataDeviceHandler for MyWorld {
          _: &wayland_client::QueueHandle<Self>,
          _: &wayland_client::protocol::wl_data_device::WlDataDevice,
      ) {
@@ -95,7 +120,7 @@ index 664c909..7819361 100644
      }
  
      fn motion(
-@@ -461,9 +483,10 @@ impl DataDeviceHandler for MyWorld {
+@@ -461,9 +500,10 @@ impl DataDeviceHandler for MyWorld {
          _: &wayland_client::Connection,
          _: &wayland_client::QueueHandle<Self>,
          _: &wayland_client::protocol::wl_data_device::WlDataDevice,
@@ -108,7 +133,7 @@ index 664c909..7819361 100644
      }
  
      fn leave(
-@@ -472,17 +495,27 @@ impl DataDeviceHandler for MyWorld {
+@@ -472,17 +512,27 @@ impl DataDeviceHandler for MyWorld {
          _: &wayland_client::QueueHandle<Self>,
          _: &wayland_client::protocol::wl_data_device::WlDataDevice,
      ) {
@@ -140,7 +165,92 @@ index 664c909..7819361 100644
      }
  }
  
-@@ -611,6 +644,7 @@ impl PrimarySelectionDeviceHandler for MyWorld {
+@@ -491,54 +541,74 @@ impl DataSourceHandler for MyWorld {
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_source::WlDataSource,
++        source: &wayland_client::protocol::wl_data_source::WlDataSource,
+         mime: String,
+         fd: smithay_client_toolkit::data_device_manager::WritePipe,
+     ) {
+-        self.clipboard.requests.push((mime, fd));
++        if self.dnd_source.source.as_ref() == Some(&source.id()) {
++            self.dnd_source.requests.push((mime, fd));
++        } else {
++            self.clipboard.requests.push((mime, fd));
++        }
+     }
+ 
+     fn cancelled(
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_source::WlDataSource,
++        source: &wayland_client::protocol::wl_data_source::WlDataSource,
+     ) {
+-        self.clipboard.cancelled = true;
++        if self.dnd_source.source.as_ref() == Some(&source.id()) {
++            self.dnd_source.cancelled = true;
++        } else {
++            self.clipboard.cancelled = true;
++        }
+     }
+ 
+     fn action(
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_source::WlDataSource,
+-        _: wayland_client::protocol::wl_data_device_manager::DndAction,
++        source: &wayland_client::protocol::wl_data_source::WlDataSource,
++        action: wayland_client::protocol::wl_data_device_manager::DndAction,
+     ) {
++        if self.dnd_source.source.as_ref() == Some(&source.id()) {
++            self.dnd_source.action = Some(action);
++        }
+     }
+ 
+     fn dnd_finished(
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_source::WlDataSource,
++        source: &wayland_client::protocol::wl_data_source::WlDataSource,
+     ) {
++        if self.dnd_source.source.as_ref() == Some(&source.id()) {
++            self.dnd_source.finished = true;
++        }
+     }
+ 
+     fn dnd_dropped(
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_source::WlDataSource,
++        source: &wayland_client::protocol::wl_data_source::WlDataSource,
+     ) {
++        if self.dnd_source.source.as_ref() == Some(&source.id()) {
++            self.dnd_source.dropped = true;
++        }
+     }
+ 
+     fn accept_mime(
+         &mut self,
+         _: &wayland_client::Connection,
+         _: &wayland_client::QueueHandle<Self>,
+-        _: &wayland_client::protocol::wl_data_source::WlDataSource,
+-        _: Option<String>,
++        source: &wayland_client::protocol::wl_data_source::WlDataSource,
++        mime: Option<String>,
+     ) {
++        if self.dnd_source.source.as_ref() == Some(&source.id()) {
++            self.dnd_source.accepted_mime = Some(mime);
++        }
+     }
+ }
+ 
+@@ -611,6 +681,7 @@ impl PrimarySelectionDeviceHandler for MyWorld {
          };
  
          self.primary.offer = data.selection_offer();
@@ -252,98 +362,149 @@ index 379df77..1817e33 100644
          if let Some(r) = self.queue.prepare_read() {
              let fd = r.connection_fd();
 diff --git a/src/server/selection.rs b/src/server/selection.rs
-index bd32aaa..bcd9a01 100644
+index bd32aaa..5e94dd3 100644
 --- a/src/server/selection.rs
 +++ b/src/server/selection.rs
-@@ -98,7 +98,8 @@ impl<S: X11Selection> InnerServerState<S> {
-             events.cancelled = false;
-         }
+@@ -1,4 +1,5 @@
+ use super::clientside::SelectionEvents;
++use super::event::LastClickSerial;
+ use super::{InnerServerState, MyWorld, ServerState};
+ use crate::{X11Selection, XConnection};
+ use log::{info, warn};
+@@ -8,8 +9,10 @@ use wayland_client::protocol::wl_seat::WlSeat;
+ use wayland_client::{Proxy, QueueHandle};
  
--        if state.source.is_none() {
-+        if events.offer_changed {
-+            events.offer_changed = false;
-             if let Some(offer) = T::take_offer(&mut events.offer) {
-                 let mime_types = T::get_mimes(&offer);
-                 let foreign = ForeignSelection {
-@@ -106,6 +107,11 @@ impl<S: X11Selection> InnerServerState<S> {
-                     inner: offer,
-                 };
-                 state.source = Some(SelectionData::Foreign(foreign));
-+            } else if matches!(state.source, Some(SelectionData::Foreign(_))) {
-+                // A selection callback without an offer means the native
-+                // Wayland selection was cleared.  Keep an X11-backed source:
-+                // owners do not receive an offer for their own source.
-+                state.source = None;
-             }
+ use smithay_client_toolkit::data_device_manager::{
+-    DataDeviceManagerState, data_device::DataDevice,
+-    data_offer::SelectionOffer as WlSelectionOffer, data_source::CopyPasteSource,
++    DataDeviceManagerState,
++    data_device::DataDevice,
++    data_offer::SelectionOffer as WlSelectionOffer,
++    data_source::{CopyPasteSource, DragSource},
+ };
+ use smithay_client_toolkit::primary_selection::PrimarySelectionManagerState;
+ use smithay_client_toolkit::primary_selection::device::PrimarySelectionDevice;
+@@ -17,10 +20,12 @@ use smithay_client_toolkit::primary_selection::offer::PrimarySelectionOffer;
+ use smithay_client_toolkit::primary_selection::selection::PrimarySelectionSource;
+ use std::io::Read;
+ use std::rc::{Rc, Weak};
++use wayland_client::protocol::wl_data_device_manager::DndAction;
+ 
+ pub(super) struct SelectionStates<S: X11Selection> {
+     clipboard: Option<SelectionState<S, Clipboard>>,
+     primary: Option<SelectionState<S, Primary>>,
++    dnd: Option<X11DndSource<S>>,
+ }
+ 
+ impl<S: X11Selection> SelectionStates<S> {
+@@ -36,6 +41,7 @@ impl<S: X11Selection> SelectionStates<S> {
+                 .inspect_err(|_| info!("Primary selection unsupported."))
+                 .ok()
+                 .map(SelectionState::new),
++            dnd: None,
          }
      }
-@@ -131,6 +137,29 @@ impl<S: X11Selection> InnerServerState<S> {
-         }
-     }
  
-+    /// Stop exporting an X11-owned selection to Wayland.
-+    ///
-+    /// XFixes reports owner destruction independently from the Wayland data-source
-+    /// cancellation event.  Keeping the source alive after its X11 owner vanished
-+    /// leaves a MIME-only clipboard whose reads return EOF, and it can mask the next
-+    /// native Wayland selection.  Clear only sources which originated on X11; a
-+    /// Wayland-owned selection must remain untouched.
-+    pub(crate) fn clear_x11_selection_source<T: SelectionType>(&mut self) {
-+        let Some(state) = T::selection_state(&mut self.selection_states) else {
-+            return;
+@@ -50,6 +56,20 @@ impl<S: X11Selection> SelectionStates<S> {
+     }
+ }
+ 
++struct X11DndSource<S: X11Selection> {
++    _source: DragSource,
++    data: Weak<S>,
++}
++
++#[derive(Default)]
++pub(crate) struct DndSourceUpdate {
++    pub cancelled: bool,
++    pub dropped: bool,
++    pub finished: bool,
++    pub accepted_mime: Option<Option<String>>,
++    pub action: Option<DndAction>,
++}
++
+ enum SelectionData<S: X11Selection, T: SelectionType> {
+     X11 { inner: T::Source, data: Weak<S> },
+     Foreign(ForeignSelection<T>),
+@@ -144,6 +164,72 @@ impl<S: X11Selection> InnerServerState<S> {
+                 })
+             })
+     }
++
++    pub(crate) fn start_x11_dnd(&mut self, selection: &Rc<S>) -> bool {
++        let Some(window) = self.last_hovered else {
++            return false;
 +        };
-+        if !matches!(state.source, Some(SelectionData::X11 { .. })) {
-+            return;
++        let Some(entity) = self.windows.get(&window).copied() else {
++            return false;
++        };
++        let (surface, serial) = {
++            let Ok(surface) = self
++                .world
++                .get::<&wayland_client::protocol::wl_surface::WlSurface>(entity)
++            else {
++                return false;
++            };
++            let Ok(click) = self.world.get::<&LastClickSerial>(entity) else {
++                return false;
++            };
++            ((*surface).clone(), click.1)
++        };
++        let Some(clipboard) = self.selection_states.clipboard.as_ref() else {
++            return false;
++        };
++        let Some(device) = clipboard.device.as_ref() else {
++            return false;
++        };
++        let source = clipboard.manager.create_drag_and_drop_source(
++            &self.qh,
++            selection.mime_types(),
++            DndAction::Copy | DndAction::Move,
++        );
++        self.world.dnd_source = Default::default();
++        self.world.dnd_source.source = Some(source.inner().id());
++        source.start_drag(device, &surface, None, serial);
++        self.selection_states.dnd = Some(X11DndSource {
++            _source: source,
++            data: Rc::downgrade(selection),
++        });
++        true
++    }
++
++    pub(crate) fn take_x11_dnd_update(&mut self) -> DndSourceUpdate {
++        let events = &mut self.world.dnd_source;
++        if let Some(dnd) = self.selection_states.dnd.as_ref() {
++            for (mime, pipe) in std::mem::take(&mut events.requests) {
++                if let Some(data) = dnd.data.upgrade() {
++                    data.write_to(&mime, pipe);
++                }
++            }
++        } else {
++            events.requests.clear();
 +        }
 +
-+        state.source = None;
-+        if let (Some(device), Some((_, serial))) =
-+            (state.device.as_ref(), self.last_kb_serial.as_ref())
-+        {
-+            T::unset_selection(device, *serial);
++        let update = DndSourceUpdate {
++            cancelled: std::mem::take(&mut events.cancelled),
++            dropped: std::mem::take(&mut events.dropped),
++            finished: std::mem::take(&mut events.finished),
++            accepted_mime: events.accepted_mime.take(),
++            action: events.action.take(),
++        };
++        if update.cancelled || update.finished {
++            self.selection_states.dnd = None;
++            events.source = None;
 +        }
++        update
 +    }
-+
-     pub(crate) fn new_selection<T: SelectionType>(&mut self) -> Option<ForeignSelection<T>> {
-         T::selection_state(&mut self.selection_states)
-             .as_mut()
-@@ -187,6 +216,8 @@ pub trait SelectionType: Sized {
+ }
  
-     fn set_selection(source: &Self::Source, device: &Self::DataDevice, serial: u32);
- 
-+    fn unset_selection(device: &Self::DataDevice, serial: u32);
-+
-     fn get_events(world: &mut MyWorld) -> &mut SelectionEvents<Self::Offer>;
- 
-     fn receive_offer(offer: &Self::Offer, mime_type: String) -> std::io::Result<ReadPipe>;
-@@ -226,6 +257,10 @@ impl SelectionType for Clipboard {
-         source.set_selection(device, serial);
-     }
- 
-+    fn unset_selection(device: &Self::DataDevice, serial: u32) {
-+        device.unset_selection(serial);
-+    }
-+
-     fn get_events(world: &mut MyWorld) -> &mut SelectionEvents<Self::Offer> {
-         &mut world.clipboard
-     }
-@@ -274,6 +309,10 @@ impl SelectionType for Primary {
-         source.set_selection(device, serial);
-     }
- 
-+    fn unset_selection(device: &Self::DataDevice, serial: u32) {
-+        device.unset_selection(serial);
-+    }
-+
-     fn get_events(world: &mut MyWorld) -> &mut SelectionEvents<Self::Offer> {
-         &mut world.primary
-     }
+ pub struct ForeignSelection<T: SelectionType> {
 diff --git a/src/xstate/dnd.rs b/src/xstate/dnd.rs
 new file mode 100644
-index 0000000..37ee5a2
+index 0000000..ebde1b8
 --- /dev/null
 +++ b/src/xstate/dnd.rs
-@@ -0,0 +1,488 @@
+@@ -0,0 +1,972 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +//
 +// Copy-only XDND bridge.  The state transitions follow the Xdnd v5 ordering
@@ -351,15 +512,18 @@ index 0000000..37ee5a2
 +// implementation for xwayland-satellite.
 +
 +use super::XState;
++use super::selection::Selection;
++use crate::server::selection::DndSourceUpdate;
 +use crate::server::{ResolvedDndEvent, ServerState};
 +use crate::xstate::RealConnection;
 +use log::{debug, warn};
 +use smithay_client_toolkit::data_device_manager::data_offer::DragOffer;
++use std::collections::HashMap;
++use std::rc::Rc;
 +use wayland_client::protocol::wl_data_device_manager::DndAction;
-+use xcb::{Xid, x};
++use xcb::{Xid, XidNew, x};
 +
 +pub(super) const XDND_VERSION: u32 = 5;
-+const URI_LIST: &str = "text/uri-list";
 +
 +#[derive(Debug)]
 +struct ActiveDnd {
@@ -367,8 +531,10 @@ index 0000000..37ee5a2
 +    target: x::Window,
 +    serial: u32,
 +    version: u32,
-+    mime_atom: x::Atom,
-+    data: Option<Vec<u8>>,
++    mimes: Vec<(String, x::Atom)>,
++    data: HashMap<String, Vec<u8>>,
++    action: DndAction,
++    incr: Option<WaylandDndIncr>,
 +    accepted: bool,
 +    position_pending: bool,
 +    cached_position: Option<(f64, f64)>,
@@ -376,9 +542,33 @@ index 0000000..37ee5a2
 +    dropped: bool,
 +}
 +
-+#[derive(Debug, Default)]
++#[derive(Debug)]
++struct WaylandDndIncr {
++    data: Vec<u8>,
++    start: usize,
++    property: x::Atom,
++    requestor: x::Window,
++    target: x::Atom,
++}
++
++#[derive(Default)]
 +pub(super) struct DndBridge {
 +    active: Option<ActiveDnd>,
++    x_to_wl: Option<XToWlDnd>,
++    pending_x_owner: Option<(x::Window, u32)>,
++}
++
++struct XToWlDnd {
++    selection: Rc<Selection>,
++    source: x::Window,
++    version: u32,
++    accepted_mime: Option<String>,
++    selected_action: DndAction,
++    dropped_on_x: bool,
++    dropped_on_wayland: bool,
++    mime_known: bool,
++    action_known: bool,
++    position_pending: bool,
 +}
 +
 +impl DndBridge {
@@ -395,6 +585,300 @@ index 0000000..37ee5a2
 +            event: &event,
 +        }) {
 +            warn!("failed to send XDND event to {target:?}: {error:?}");
++        }
++    }
++
++    fn send_message_as(
++        state: &XState,
++        destination: x::Window,
++        event_window: x::Window,
++        ty: x::Atom,
++        data: [u32; 5],
++    ) {
++        let event =
++            x::ClientMessageEvent::new(event_window, ty, x::ClientMessageData::Data32(data));
++        if let Err(error) = state.connection.send_and_check_request(&x::SendEvent {
++            propagate: false,
++            destination: x::SendEventDest::Window(destination),
++            event_mask: x::EventMask::empty(),
++            event: &event,
++        }) {
++            warn!("failed to send XDND proxy event to {destination:?}: {error:?}");
++        }
++    }
++
++    fn read_xdnd_types(state: &XState, source: x::Window, data: &[u32; 5]) -> Vec<x::Atom> {
++        if data[1] & 1 == 0 {
++            return data[2..5]
++                .iter()
++                .copied()
++                .filter(|atom| *atom != x::ATOM_NONE.resource_id())
++                .map(x::Atom::new)
++                .collect();
++        }
++        let cookie = state.connection.send_request(&x::GetProperty {
++            delete: false,
++            window: source,
++            property: state.atoms.xdnd_type_list,
++            r#type: x::ATOM_ATOM,
++            long_offset: 0,
++            long_length: u32::MAX,
++        });
++        state
++            .connection
++            .wait_for_reply(cookie)
++            .map(|reply| {
++                reply
++                    .value::<x::Atom>()
++                    .iter()
++                    .copied()
++                    .filter(|atom| {
++                        ![
++                            state.atoms.targets,
++                            state.atoms.multiple,
++                            state.atoms.save_targets,
++                            state.atoms.timestamp,
++                        ]
++                        .contains(atom)
++                    })
++                    .collect()
++            })
++            .unwrap_or_default()
++    }
++
++    fn start_x11_source(
++        &mut self,
++        state: &XState,
++        server: &mut ServerState<RealConnection>,
++        source: x::Window,
++        version: u32,
++        targets: Vec<x::Atom>,
++    ) {
++        if targets.is_empty() {
++            return;
++        }
++        let selection = Selection::from_targets(
++            state.connection.clone(),
++            state.wm_window,
++            state.atoms.xdnd_selection,
++            x::CURRENT_TIME,
++            state.atoms.incr,
++            &targets,
++        );
++        if !server.start_x11_dnd(&selection) {
++            debug!("could not start native drag for X11 source {source:?}");
++            return;
++        }
++        self.x_to_wl = Some(XToWlDnd {
++            selection,
++            source,
++            version,
++            accepted_mime: None,
++            selected_action: DndAction::None,
++            dropped_on_x: false,
++            dropped_on_wayland: false,
++            mime_known: false,
++            action_known: false,
++            position_pending: false,
++        });
++    }
++
++    fn begin_x11_owner(&mut self, state: &XState, owner: x::Window, timestamp: u32) {
++        if owner == x::Window::none() || owner == state.wm_window {
++            return;
++        }
++        self.pending_x_owner = Some((owner, timestamp));
++        let _ = state
++            .connection
++            .send_and_check_request(&x::ConvertSelection {
++                requestor: state.wm_window,
++                selection: state.atoms.xdnd_selection,
++                target: state.atoms.targets,
++                property: state.atoms.xdnd_targets,
++                time: timestamp,
++            });
++    }
++
++    fn targets_received(
++        &mut self,
++        state: &XState,
++        event: &x::SelectionNotifyEvent,
++        server: &mut ServerState<RealConnection>,
++    ) -> bool {
++        if event.selection() != state.atoms.xdnd_selection
++            || event.requestor() != state.wm_window
++            || event.target() != state.atoms.targets
++            || event.property() != state.atoms.xdnd_targets
++        {
++            return false;
++        }
++        let Some((owner, _)) = self.pending_x_owner.take() else {
++            return false;
++        };
++        let targets = state
++            .connection
++            .wait_for_reply(state.connection.send_request(&x::GetProperty {
++                delete: true,
++                window: state.wm_window,
++                property: state.atoms.xdnd_targets,
++                r#type: x::ATOM_ATOM,
++                long_offset: 0,
++                long_length: u32::MAX,
++            }))
++            .map(|reply| reply.value::<x::Atom>().to_vec())
++            .unwrap_or_default();
++        self.finish_x11_source(state, false);
++        self.start_x11_source(state, server, owner, XDND_VERSION, targets);
++        true
++    }
++
++    fn x11_action_atom(state: &XState, action: DndAction) -> x::Atom {
++        if action.contains(DndAction::Move) {
++            state.atoms.xdnd_action_move
++        } else if action.contains(DndAction::Copy) {
++            state.atoms.xdnd_action_copy
++        } else {
++            x::ATOM_NONE
++        }
++    }
++
++    fn send_x11_status(&self, state: &XState) {
++        let Some(dnd) = self.x_to_wl.as_ref() else {
++            return;
++        };
++        let accepted = dnd.accepted_mime.is_some()
++            && dnd
++                .selected_action
++                .intersects(DndAction::Copy | DndAction::Move);
++        Self::send_message_as(
++            state,
++            dnd.source,
++            dnd.source,
++            state.atoms.xdnd_status,
++            [
++                state.wm_window.resource_id(),
++                u32::from(accepted),
++                0,
++                0,
++                if accepted {
++                    Self::x11_action_atom(state, dnd.selected_action).resource_id()
++                } else {
++                    x::ATOM_NONE.resource_id()
++                },
++            ],
++        );
++    }
++
++    fn finish_x11_source(&mut self, state: &XState, success: bool) {
++        let Some(dnd) = self.x_to_wl.take() else {
++            return;
++        };
++        let reports_result = dnd.version >= 5;
++        Self::send_message_as(
++            state,
++            dnd.source,
++            dnd.source,
++            state.atoms.xdnd_finished,
++            [
++                state.wm_window.resource_id(),
++                u32::from(success && reports_result),
++                if success && reports_result {
++                    Self::x11_action_atom(state, dnd.selected_action).resource_id()
++                } else {
++                    x::ATOM_NONE.resource_id()
++                },
++                0,
++                0,
++            ],
++        );
++    }
++
++    fn x11_source_message(
++        &mut self,
++        state: &XState,
++        event: &x::ClientMessageEvent,
++        server: &mut ServerState<RealConnection>,
++    ) -> bool {
++        let x::ClientMessageData::Data32(data) = event.data() else {
++            return false;
++        };
++        if event.r#type() == state.atoms.xdnd_enter {
++            let source = x::Window::new(data[0]);
++            let version = (data[1] >> 24).min(XDND_VERSION);
++            if let Some(dnd) = self.x_to_wl.as_mut().filter(|dnd| dnd.source == source) {
++                dnd.version = version;
++            } else {
++                let targets = Self::read_xdnd_types(state, source, &data);
++                self.finish_x11_source(state, false);
++                self.start_x11_source(state, server, source, version, targets);
++            }
++            return true;
++        }
++        if event.r#type() == state.atoms.xdnd_position {
++            if let Some(dnd) = self
++                .x_to_wl
++                .as_mut()
++                .filter(|dnd| dnd.source.resource_id() == data[0])
++            {
++                dnd.position_pending = true;
++            }
++            if self
++                .x_to_wl
++                .as_ref()
++                .is_some_and(|dnd| dnd.position_pending && dnd.mime_known && dnd.action_known)
++            {
++                self.send_x11_status(state);
++                self.x_to_wl.as_mut().unwrap().position_pending = false;
++            }
++            return true;
++        }
++        if event.r#type() == state.atoms.xdnd_drop {
++            if let Some(dnd) = self
++                .x_to_wl
++                .as_mut()
++                .filter(|dnd| dnd.source.resource_id() == data[0])
++            {
++                dnd.dropped_on_x = true;
++            }
++            return true;
++        }
++        if event.r#type() == state.atoms.xdnd_leave {
++            if self
++                .x_to_wl
++                .as_ref()
++                .is_some_and(|dnd| dnd.source.resource_id() == data[0])
++            {
++                self.finish_x11_source(state, false);
++            }
++            return true;
++        }
++        false
++    }
++
++    fn update_x11_source(&mut self, state: &XState, update: DndSourceUpdate) {
++        let Some(dnd) = self.x_to_wl.as_mut() else {
++            return;
++        };
++        if let Some(mime) = update.accepted_mime {
++            dnd.accepted_mime = mime;
++            dnd.mime_known = true;
++        }
++        if let Some(action) = update.action {
++            dnd.selected_action = action;
++            dnd.action_known = true;
++        }
++        if update.dropped {
++            dnd.dropped_on_wayland = true;
++        }
++        let send_status = dnd.position_pending && dnd.mime_known && dnd.action_known;
++        if update.cancelled {
++            self.finish_x11_source(state, false);
++        } else if update.finished {
++            let success = dnd.dropped_on_x && dnd.dropped_on_wayland;
++            self.finish_x11_source(state, success);
++        } else if send_status {
++            self.send_x11_status(state);
++            self.x_to_wl.as_mut().unwrap().position_pending = false;
 +        }
 +    }
 +
@@ -520,9 +1004,9 @@ index 0000000..37ee5a2
 +    fn enter(&mut self, state: &XState, offer: DragOffer, target: x::Window, x: f64, y: f64) {
 +        self.clear_active(state, true, false);
 +
-+        let has_uri_list = offer.with_mime_types(|mimes| mimes.iter().any(|m| m == URI_LIST));
-+        if !has_uri_list {
-+            debug!("rejecting non-file Wayland drag for X11 target {target:?}");
++        let mime_names = offer.with_mime_types(|mimes| mimes.to_vec());
++        if mime_names.is_empty() {
++            debug!("rejecting Wayland drag without MIME types for X11 target {target:?}");
 +            offer.accept_mime_type(offer.serial, None);
 +            return;
 +        }
@@ -539,32 +1023,60 @@ index 0000000..37ee5a2
 +            return;
 +        }
 +
-+        offer.set_actions(DndAction::Copy, DndAction::Copy);
-+        offer.accept_mime_type(offer.serial, Some(URI_LIST.to_string()));
-+        let mime_atom = state
-+            .connection
-+            .wait_for_reply(state.connection.send_request(&x::InternAtom {
-+                only_if_exists: false,
-+                name: URI_LIST.as_bytes(),
-+            }))
-+            .expect("failed to intern text/uri-list")
-+            .atom();
++        let supported = offer.source_actions & (DndAction::Copy | DndAction::Move);
++        let action = if supported.contains(DndAction::Copy) {
++            DndAction::Copy
++        } else if supported.contains(DndAction::Move) {
++            DndAction::Move
++        } else {
++            DndAction::Copy
++        };
++        offer.set_actions(DndAction::Copy | DndAction::Move, action);
++        let mimes: Vec<_> = mime_names
++            .into_iter()
++            .map(|mime| {
++                let atom = state
++                    .connection
++                    .wait_for_reply(state.connection.send_request(&x::InternAtom {
++                        only_if_exists: false,
++                        name: mime.as_bytes(),
++                    }))
++                    .expect("failed to intern DND MIME type")
++                    .atom();
++                (mime, atom)
++            })
++            .collect();
++        offer.accept_mime_type(offer.serial, Some(mimes[0].0.clone()));
 +
 +        if !Self::claim_selection(state) {
 +            offer.accept_mime_type(offer.serial, None);
 +            return;
 +        }
 +
++        if mimes.len() > 3 {
++            let atoms: Vec<_> = mimes.iter().map(|(_, atom)| *atom).collect();
++            let _ = state.connection.send_and_check_request(&x::ChangeProperty {
++                mode: x::PropMode::Replace,
++                window: state.wm_window,
++                property: state.atoms.xdnd_type_list,
++                r#type: x::ATOM_ATOM,
++                data: &atoms,
++            });
++        }
++        let mut advertised = [0; 3];
++        for (slot, (_, atom)) in advertised.iter_mut().zip(&mimes) {
++            *slot = atom.resource_id();
++        }
 +        Self::send_message(
 +            state,
 +            target,
 +            state.atoms.xdnd_enter,
 +            [
 +                state.wm_window.resource_id(),
-+                version << 24,
-+                mime_atom.resource_id(),
-+                0,
-+                0,
++                version << 24 | u32::from(mimes.len() > 3),
++                advertised[0],
++                advertised[1],
++                advertised[2],
 +            ],
 +        );
 +        self.active = Some(ActiveDnd {
@@ -572,8 +1084,10 @@ index 0000000..37ee5a2
 +            offer,
 +            target,
 +            version,
-+            mime_atom,
-+            data: None,
++            mimes,
++            data: HashMap::new(),
++            action,
++            incr: None,
 +            accepted: false,
 +            position_pending: false,
 +            cached_position: None,
@@ -600,7 +1114,7 @@ index 0000000..37ee5a2
 +                0,
 +                Self::root_coords(state, active.target, x, y),
 +                0,
-+                state.atoms.xdnd_action_copy.resource_id(),
++                Self::x11_action_atom(state, active.action).resource_id(),
 +            ],
 +        );
 +        active.position_pending = true;
@@ -667,6 +1181,8 @@ index 0000000..37ee5a2
 +        let mut success = false;
 +        if let Some(active) = self.active.as_mut() {
 +            if event.target() == state.atoms.targets {
++                let mut atoms = vec![state.atoms.targets, state.atoms.timestamp];
++                atoms.extend(active.mimes.iter().map(|(_, atom)| *atom));
 +                success = state
 +                    .connection
 +                    .send_and_check_request(&x::ChangeProperty {
@@ -674,7 +1190,7 @@ index 0000000..37ee5a2
 +                        window: event.requestor(),
 +                        property,
 +                        r#type: x::ATOM_ATOM,
-+                        data: &[state.atoms.targets, state.atoms.timestamp, active.mime_atom],
++                        data: &atoms,
 +                    })
 +                    .is_ok();
 +            } else if event.target() == state.atoms.timestamp {
@@ -688,23 +1204,58 @@ index 0000000..37ee5a2
 +                        data: &[x::CURRENT_TIME],
 +                    })
 +                    .is_ok();
-+            } else if event.target() == active.mime_atom {
-+                if active.data.is_none() {
-+                    active.data =
-+                        Some(server.receive_dnd_offer(&active.offer, URI_LIST.to_string()));
++            } else if let Some((mime, atom)) = active
++                .mimes
++                .iter()
++                .find(|(_, atom)| *atom == event.target())
++                .cloned()
++            {
++                active
++                    .offer
++                    .accept_mime_type(active.serial, Some(mime.clone()));
++                if !active.data.contains_key(&mime) {
++                    let data = server.receive_dnd_offer(&active.offer, mime.clone());
++                    active.data.insert(mime.clone(), data);
 +                }
-+                let data = active.data.as_deref().unwrap_or_default();
-+                success = !data.is_empty()
-+                    && state
++                let data = active.data.get(&mime).cloned().unwrap_or_default();
++                if data.len() > state.max_req_bytes {
++                    let _ = state
++                        .connection
++                        .send_and_check_request(&x::ChangeWindowAttributes {
++                            window: event.requestor(),
++                            value_list: &[x::Cw::EventMask(x::EventMask::PROPERTY_CHANGE)],
++                        });
++                    success = state
 +                        .connection
 +                        .send_and_check_request(&x::ChangeProperty {
 +                            mode: x::PropMode::Replace,
 +                            window: event.requestor(),
 +                            property,
-+                            r#type: active.mime_atom,
-+                            data,
++                            r#type: state.atoms.incr,
++                            data: &[data.len() as u32],
 +                        })
 +                        .is_ok();
++                    if success {
++                        active.incr = Some(WaylandDndIncr {
++                            data,
++                            start: 0,
++                            property,
++                            requestor: event.requestor(),
++                            target: atom,
++                        });
++                    }
++                } else {
++                    success = state
++                        .connection
++                        .send_and_check_request(&x::ChangeProperty {
++                            mode: x::PropMode::Replace,
++                            window: event.requestor(),
++                            property,
++                            r#type: atom,
++                            data: &data,
++                        })
++                        .is_ok();
++                }
 +            }
 +        }
 +
@@ -724,6 +1275,35 @@ index 0000000..37ee5a2
 +        true
 +    }
 +
++    fn continue_wayland_incr(&mut self, state: &XState, event: &x::PropertyNotifyEvent) -> bool {
++        let Some(incr) = self.active.as_mut().and_then(|active| active.incr.as_mut()) else {
++            return false;
++        };
++        if event.state() != x::Property::Delete
++            || event.window() != incr.requestor
++            || event.atom() != incr.property
++        {
++            return false;
++        }
++        let end = (incr.start + state.max_req_bytes).min(incr.data.len());
++        let chunk = &incr.data[incr.start..end];
++        let result = state.connection.send_and_check_request(&x::ChangeProperty {
++            mode: x::PropMode::Replace,
++            window: incr.requestor,
++            property: incr.property,
++            r#type: incr.target,
++            data: chunk,
++        });
++        if result.is_err() || chunk.is_empty() {
++            if let Some(active) = self.active.as_mut() {
++                active.incr = None;
++            }
++        } else {
++            incr.start = end;
++        }
++        true
++    }
++
 +    fn client_message(&mut self, state: &XState, event: &x::ClientMessageEvent) -> bool {
 +        let x::ClientMessageData::Data32(data) = event.data() else {
 +            return false;
@@ -736,13 +1316,22 @@ index 0000000..37ee5a2
 +                return false;
 +            }
 +            active.position_pending = false;
-+            active.accepted =
-+                data[1] & 1 != 0 && data[4] == state.atoms.xdnd_action_copy.resource_id();
++            let action = if data[4] == state.atoms.xdnd_action_move.resource_id() {
++                DndAction::Move
++            } else if data[4] == state.atoms.xdnd_action_copy.resource_id() {
++                DndAction::Copy
++            } else {
++                DndAction::None
++            };
++            active.accepted = data[1] & 1 != 0 && action != DndAction::None;
 +            if active.accepted {
-+                active.offer.set_actions(DndAction::Copy, DndAction::Copy);
++                active.action = action;
 +                active
 +                    .offer
-+                    .accept_mime_type(active.serial, Some(URI_LIST.to_string()));
++                    .set_actions(DndAction::Copy | DndAction::Move, action);
++                active
++                    .offer
++                    .accept_mime_type(active.serial, Some(active.mimes[0].0.clone()));
 +            } else {
 +                active.offer.accept_mime_type(active.serial, None);
 +            }
@@ -776,10 +1365,50 @@ index 0000000..37ee5a2
 +        server: &mut ServerState<RealConnection>,
 +    ) -> bool {
 +        match event {
++            xcb::Event::XFixes(xcb::xfixes::Event::SelectionNotify(event))
++                if event.selection() == state.atoms.xdnd_selection =>
++            {
++                match event.subtype() {
++                    xcb::xfixes::SelectionEvent::SetSelectionOwner => {
++                        self.begin_x11_owner(state, event.owner(), event.timestamp());
++                    }
++                    xcb::xfixes::SelectionEvent::SelectionWindowDestroy
++                    | xcb::xfixes::SelectionEvent::SelectionClientClose => {
++                        self.pending_x_owner = None;
++                        self.finish_x11_source(state, false);
++                    }
++                }
++                true
++            }
++            xcb::Event::X(x::Event::PropertyNotify(event))
++                if event.state() == x::Property::Delete =>
++            {
++                self.continue_wayland_incr(state, event)
++            }
++            xcb::Event::X(x::Event::SelectionNotify(event))
++                if event.selection() == state.atoms.xdnd_selection =>
++            {
++                if self.targets_received(state, event, server) {
++                    return true;
++                }
++                if let Some(dnd) = self.x_to_wl.as_ref() {
++                    dnd.selection.handle_notify(event.target());
++                }
++                true
++            }
++            xcb::Event::X(x::Event::PropertyNotify(event))
++                if event.state() == x::Property::NewValue =>
++            {
++                self.x_to_wl
++                    .as_ref()
++                    .is_some_and(|dnd| dnd.selection.check_for_incr(event))
++            }
 +            xcb::Event::X(x::Event::SelectionRequest(event)) => {
 +                self.selection_request(state, event, server)
 +            }
-+            xcb::Event::X(x::Event::ClientMessage(event)) => self.client_message(state, event),
++            xcb::Event::X(x::Event::ClientMessage(event)) => {
++                self.x11_source_message(state, event, server) || self.client_message(state, event)
++            }
 +            xcb::Event::X(x::Event::SelectionClear(event))
 +                if event.selection() == state.atoms.xdnd_selection =>
 +            {
@@ -807,6 +1436,16 @@ index 0000000..37ee5a2
 +impl XState {
 +    pub(crate) fn handle_wayland_dnd(&mut self, event: ResolvedDndEvent) {
 +        let mut dnd = std::mem::take(&mut self.dnd);
++        if dnd.x_to_wl.is_some() {
++            if let ResolvedDndEvent::Enter { offer, .. } = event {
++                // This is our own X11 source re-entering an Xwayland surface.
++                // Native targets are handled by the compositor; do not bridge
++                // the offer back into the same X server.
++                offer.accept_mime_type(offer.serial, None);
++            }
++            self.dnd = dnd;
++            return;
++        }
 +        match event {
 +            ResolvedDndEvent::Enter {
 +                offer,
@@ -818,6 +1457,12 @@ index 0000000..37ee5a2
 +            ResolvedDndEvent::Leave => dnd.leave(self),
 +            ResolvedDndEvent::Drop => dnd.drop(self),
 +        }
++        self.dnd = dnd;
++    }
++
++    pub(crate) fn handle_x11_dnd_update(&mut self, update: DndSourceUpdate) {
++        let mut dnd = std::mem::take(&mut self.dnd);
++        dnd.update_x11_source(self, update);
 +        self.dnd = dnd;
 +    }
 +
@@ -833,7 +1478,7 @@ index 0000000..37ee5a2
 +    }
 +}
 diff --git a/src/xstate/mod.rs b/src/xstate/mod.rs
-index efcb13d..ab2e53e 100644
+index efcb13d..150871b 100644
 --- a/src/xstate/mod.rs
 +++ b/src/xstate/mod.rs
 @@ -1,5 +1,7 @@
@@ -852,7 +1497,23 @@ index efcb13d..ab2e53e 100644
      settings: Settings,
      max_req_bytes: usize,
  }
-@@ -215,6 +218,7 @@ impl XState {
+@@ -201,6 +204,15 @@ impl XState {
+                     | SelectionEventMask::SELECTION_CLIENT_CLOSE,
+             })
+             .unwrap();
++        connection
++            .send_and_check_request(&xcb::xfixes::SelectSelectionInput {
++                window: root,
++                selection: atoms.xdnd_selection,
++                event_mask: SelectionEventMask::SET_SELECTION_OWNER
++                    | SelectionEventMask::SELECTION_WINDOW_DESTROY
++                    | SelectionEventMask::SELECTION_CLIENT_CLOSE,
++            })
++            .unwrap();
+         {
+             // Setup default cursor theme
+             let ctx = CursorContext::new(&connection, screen).unwrap();
+@@ -215,6 +227,7 @@ impl XState {
  
          let wm_window = connection.generate_id();
          let selection_state = SelectionState::new(&connection, root, &atoms);
@@ -860,7 +1521,7 @@ index efcb13d..ab2e53e 100644
          let window_atoms = WindowTypes::intern_all(&connection).unwrap();
          let settings = Settings::new(&connection, &atoms, root);
          // maximum-request-length is returned in units of 4 bytes.
-@@ -228,6 +232,7 @@ impl XState {
+@@ -228,6 +241,7 @@ impl XState {
              atoms,
              window_atoms,
              selection_state,
@@ -868,10 +1529,34 @@ index efcb13d..ab2e53e 100644
              settings,
              max_req_bytes,
          };
-@@ -306,6 +311,16 @@ impl XState {
+@@ -278,7 +292,7 @@ impl XState {
+                 border_width: 0,
+                 class: x::WindowClass::InputOnly,
+                 visual: x::COPY_FROM_PARENT,
+-                value_list: &[],
++                value_list: &[x::Cw::EventMask(x::EventMask::PROPERTY_CHANGE)],
              })
              .unwrap();
  
+@@ -306,6 +320,31 @@ impl XState {
+             })
+             .unwrap();
+ 
++        // XDND-aware X11 sources query the window under the pointer. When the
++        // pointer is over a native Wayland surface Xwayland reports its root;
++        // proxy that root to our internal bridge window, like nested Xwayland
++        // compositors do.
++        self.set_root_property(self.atoms.xdnd_proxy, x::ATOM_WINDOW, &[self.wm_window]);
++        self.connection
++            .send_and_check_request(&x::ChangeProperty {
++                mode: x::PropMode::Replace,
++                window: self.wm_window,
++                property: self.atoms.xdnd_proxy,
++                r#type: x::ATOM_WINDOW,
++                data: &[self.wm_window],
++            })
++            .unwrap();
++
 +        self.connection
 +            .send_and_check_request(&x::ChangeProperty {
 +                mode: x::PropMode::Replace,
@@ -885,7 +1570,7 @@ index efcb13d..ab2e53e 100644
          self.connection
              .send_and_check_request(&x::ChangeProperty {
                  mode: x::PropMode::Replace,
-@@ -344,6 +359,10 @@ impl XState {
+@@ -344,6 +383,10 @@ impl XState {
          while let Some(event) = self.connection.poll_for_event().unwrap() {
              trace!("x11 event: {event:?}");
  
@@ -896,7 +1581,7 @@ index efcb13d..ab2e53e 100644
              if self.handle_selection_event(&event, server_state) {
                  continue;
              }
-@@ -920,6 +939,16 @@ xcb::atoms_struct! {
+@@ -920,6 +963,21 @@ xcb::atoms_struct! {
          primary => b"PRIMARY" only_if_exists = false,
          primary_targets => b"_primary_targets" only_if_exists = false,
          moveresize => b"_NET_WM_MOVERESIZE" only_if_exists = false,
@@ -909,29 +1594,84 @@ index efcb13d..ab2e53e 100644
 +        xdnd_drop => b"XdndDrop" only_if_exists = false,
 +        xdnd_finished => b"XdndFinished" only_if_exists = false,
 +        xdnd_type_list => b"XdndTypeList" only_if_exists = false,
++        xdnd_proxy => b"XdndProxy" only_if_exists = false,
++        xdnd_targets => b"_XWAYLAND_SATELLITE_XDND_TARGETS" only_if_exists = false,
 +        xdnd_action_copy => b"XdndActionCopy" only_if_exists = false,
++        xdnd_action_move => b"XdndActionMove" only_if_exists = false,
++        xdnd_action_ask => b"XdndActionAsk" only_if_exists = false,
++        xdnd_action_private => b"XdndActionPrivate" only_if_exists = false,
      }
  }
  
 diff --git a/src/xstate/selection.rs b/src/xstate/selection.rs
-index 8500a79..c190e9e 100644
+index 8500a79..a6d2e8e 100644
 --- a/src/xstate/selection.rs
 +++ b/src/xstate/selection.rs
-@@ -920,7 +920,13 @@ impl XState {
-                     xcb::xfixes::SelectionEvent::SelectionClientClose
-                     | xcb::xfixes::SelectionEvent::SelectionWindowDestroy => {
-                         debug!("Selection owner destroyed, selection will be unset");
--                        self.selection_state.clipboard.current_selection = None;
-+                        if x == self.atoms.clipboard {
-+                            self.selection_state.clipboard.current_selection = None;
-+                            server_state.clear_x11_selection_source::<Clipboard>();
-+                        } else {
-+                            self.selection_state.primary.current_selection = None;
-+                            server_state.clear_x11_selection_source::<Primary>();
-+                        }
-                     }
-                 },
-                 x if x == self.atoms.xsettings => match e.subtype() {
+@@ -69,6 +69,46 @@ impl X11Selection for Selection {
+ }
+ 
+ impl Selection {
++    pub(crate) fn from_targets(
++        connection: Rc<xcb::Connection>,
++        window: x::Window,
++        selection: x::Atom,
++        selection_time: u32,
++        incr: x::Atom,
++        targets: &[x::Atom],
++    ) -> Rc<Self> {
++        let selection_name = get_atom_name(&connection, selection);
++        let mimes = targets
++            .iter()
++            .copied()
++            .map(|target| {
++                let name = get_atom_name(&connection, target);
++                let property = connection
++                    .wait_for_reply(connection.send_request(&x::InternAtom {
++                        only_if_exists: false,
++                        name: &[name.as_bytes(), b"_", selection_name.as_bytes()].concat(),
++                    }))
++                    .expect("failed to intern DND transfer property")
++                    .atom();
++                SelectionTargetId {
++                    name,
++                    target,
++                    property,
++                    source: None,
++                }
++            })
++            .collect();
++        Rc::new(Self {
++            mimes,
++            connection,
++            window,
++            pending: RefCell::default(),
++            selection,
++            selection_time,
++            incr,
++        })
++    }
++
+     /// Finish handling the current pending selection (if any) and queue the next one (if any).
+     ///
+     /// Regardless of whether the selection conversion succeeds or fails, this function must be
+@@ -106,7 +146,7 @@ impl Selection {
+         }
+     }
+ 
+-    fn handle_notify(&self, target: x::Atom) {
++    pub(crate) fn handle_notify(&self, target: x::Atom) {
+         let mut pending = self.pending.borrow_mut();
+         let Some(psd) = pending.front_mut().filter(|t| t.target == target) else {
+             warn!(
+@@ -205,7 +245,7 @@ impl Selection {
+         self.next_conversion();
+     }
+ 
+-    fn check_for_incr(&self, event: &x::PropertyNotifyEvent) -> bool {
++    pub(crate) fn check_for_incr(&self, event: &x::PropertyNotifyEvent) -> bool {
+         debug_assert_eq!(event.state(), x::Property::NewValue);
+         if event.window() != self.window {
+             return false;
 diff --git a/tests/integration.rs b/tests/integration.rs
 index 102aa96..ddc130d 100644
 --- a/tests/integration.rs

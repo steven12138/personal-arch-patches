@@ -1,87 +1,62 @@
 # xwayland-satellite-dnd-fix
 
-This is a VCS package: every normal rebuild retrieves the current upstream
-`main` branch, derives a version with `pkgver()`, and then applies the local
-XDND/clipboard patch. It intentionally fails during `prepare()` if upstream
-changes make the patch incompatible; that is safer than silently installing an
-unreviewed merge.
+This VCS package replaces Arch's `xwayland-satellite` and provides the
+satellite half of bidirectional X11/Wayland drag-and-drop. Install it together
+with `niri-xwayland-dnd-fix` for X11 -> Wayland support.
 
-Update an installed copy with:
+## What it does
 
-```sh
-git pull --ff-only
-paru -Bi xwayland-satellite-dnd-fix
-# or: yay -Bi xwayland-satellite-dnd-fix
-```
+- Wayland -> X11: bridges all advertised MIME types, negotiates Copy or Move,
+  preserves XDND Position/Status ordering, supports XDND v2-v5, and transfers
+  large payloads with ICCCM INCR.
+- X11 -> Wayland: watches `XdndSelection` as soon as an X drag starts, exposes
+  its targets through a real Wayland drag source, proxies the X root window to
+  the internal XDND target, and returns Status/Finished with Copy or Move.
+- X11 -> X11: native X windows still take precedence; the root proxy is used
+  only when the pointer is over a native Wayland surface.
+- Clipboard: the normal upstream clipboard and primary-selection ownership
+  paths are retained. DND sources have separate event and lifetime state.
 
-Local Arch package for Steven's niri/Xwayland setup. It follows upstream
-`main`; the local patch is deliberately reapplied on every rebuild, so upstream
-changes cannot silently bypass or alter the DND fix.
-
-## Fixes included
-
-- Bridges a Wayland `text/uri-list` drag into an X11 XDND v5 transaction.
-- Advertises and accepts only the Copy action. It does not move or delete files.
-- Converts surface-local pointer coordinates to X11 root coordinates.
-- Rejects non-file offers and targets that do not advertise `XdndAware`.
-- Serializes Position/Status round trips and keeps only the newest queued motion.
-- Defers Drop until the final Position is acknowledged by the X11 target.
-- Retains a dropped Wayland offer through compositor leave until `XdndFinished`.
-- Handles XDND v2-v5 completion semantics and target destruction safely.
-- Lets a new Wayland clipboard/primary offer replace a stale X11-owned source.
-- Clears the correct selection when an X11 owner closes or is destroyed.
-- Ignores a stale X11-owner-destroy event when a newer X11 owner has already
-  claimed the selection, so an exiting `cpsend`/`xclip` process cannot erase a
-  newer WeChat clipboard write.
-
-This directly targets Files/Nautilus (native Wayland) -> WeChat (XWayland) and
-the stale `cpsend`/`xclip` clipboard owner masking a newer Wayland image. It does
-not broaden WeChat's bubblewrap mounts or change the `cpsend` alias.
-
-The XDND implementation is intentionally limited to Wayland -> X11 file drops.
-X11 -> Wayland drag source emulation requires a separate Wayland drag-source
-lifecycle and is not claimed by this package.
+The code is based on the XDND protocol and uses KWin only as a behavioral
+reference; no KWin source is copied.
 
 ## Build and install
 
 ```sh
-cd /home/steven/aur/xwayland-satellite-dnd-fix
-makepkg --cleanbuild --clean --force
-sudo pacman -U ./*.pkg.tar.zst
+cd xwayland-satellite-dnd-fix
+makepkg -si
 ```
 
-Installing conflicts with and replaces the installed package only for this
-transaction; the package declares `provides=('xwayland-satellite')` and does
-not use `replaces`.
+Or from the repository root:
 
-Log out and back in after installation so niri starts the new satellite. Then:
+```sh
+paru -Bi xwayland-satellite-dnd-fix
+# or
+yay -Bi xwayland-satellite-dnd-fix
+```
 
-1. Copy an image in a native Wayland app and paste it into WeChat.
-2. Drag a small file from Files into a WeChat conversation and verify it sends
-   a copy while the original remains in place.
-3. Run `journalctl --user -b -u xwayland-satellite.service` if either operation
-   fails.
+Log out and back in after installing both replacement packages. Restarting
+WeChat alone is insufficient because niri must launch satellite through its
+dedicated Wayland connection.
+
+## Updating safely
+
+The source follows upstream `main`. Every rebuild reapplies the patch with
+normal context checks; an incompatible upstream change makes `prepare()` fail
+instead of silently omitting the fix. After a successful rebuild, run the full
+test suite and repeat real-session tests in both directions before publishing.
 
 ## Rollback
 
 ```sh
-sudo pacman -S xwayland-satellite
+sudo pacman -S niri xwayland-satellite
 ```
 
-Log out and back in again after rollback. The package owns only the satellite
-binary, its user service, and its MPL license copy.
+Then log out and back in.
 
-## Verification
+## Required real-session checks
 
-The package check phase runs the upstream suite plus two new end-to-end tests:
-
-- A complete Wayland file offer -> XDND v5 exchange, including queued motion,
-  drop, post-drop leave, selection transfer, and `XdndFinished`.
-- An X11 `text/uri-list` owner being destroyed, followed by a Wayland
-  `image/png` offer taking ownership and transferring the new image bytes.
-
-## Licensing
-
-Unchanged upstream code is MPL-2.0. The new XDND bridge is GPL-2.0-or-later and
-uses KWin's Xwayland drag state ordering as a behavioral reference. The package
-therefore declares both licenses.
+Test Wayland -> X11, X11 -> Wayland, and X11 -> X11 with Copy and Move; cancel
+and rejected drops; a large file (INCR); and WeChat text/image clipboard in both
+directions. Build tests validate protocol state and regressions but cannot prove
+the behavior of a running niri/WeChat session.
