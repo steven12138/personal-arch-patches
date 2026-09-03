@@ -1,8 +1,40 @@
 diff --git a/src/lib.rs b/src/lib.rs
-index 5c861ea..3e8c435 100644
+index 5c861ea..5ce1ca7 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -231,6 +231,11 @@ pub fn main(mut data: impl RunData) -> Option<()> {
+@@ -25,6 +25,12 @@ pub trait XConnection: Sized + 'static {
+     fn raise_to_top(&mut self, window: x::Window);
+ }
+ 
++fn configure_xwayland_display(command: &mut Command, display: &std::ffi::OsStr) {
++    command
++        .env_remove("WAYLAND_SOCKET")
++        .env("WAYLAND_DISPLAY", display);
++}
++
+ pub trait X11Selection {
+     fn mime_types(&self) -> Vec<&str>;
+     fn write_to(&self, mime: &str, pipe: WritePipe);
+@@ -84,6 +90,10 @@ pub fn main(mut data: impl RunData) -> Option<()> {
+     let (ready_tx, ready_rx) = UnixStream::pair().unwrap();
+     rustix::io::fcntl_setfd(&ready_tx, rustix::io::FdFlags::empty()).unwrap();
+     let mut xwayland = Command::new("Xwayland");
++    // niri may start satellite through a dedicated WAYLAND_SOCKET. Xwayland
++    // must connect to satellite's private display below, not inherit and reuse
++    // satellite's already-consumed compositor socket fd.
++    configure_xwayland_display(&mut xwayland, socket.socket_name().unwrap().as_ref());
+     if let Some(display) = data.display() {
+         xwayland.arg(display);
+     }
+@@ -103,7 +113,6 @@ pub fn main(mut data: impl RunData) -> Option<()> {
+             &ready_tx.as_raw_fd().to_string(),
+         ])
+         .args(data.flags())
+-        .env("WAYLAND_DISPLAY", socket.socket_name().unwrap())
+         .stderr(Stdio::piped())
+         .spawn()
+         .unwrap();
+@@ -231,6 +240,11 @@ pub fn main(mut data: impl RunData) -> Option<()> {
          server_state.run();
          display.flush_clients().unwrap();
  
@@ -14,6 +46,29 @@ index 5c861ea..3e8c435 100644
          if let Some(sel) = server_state.new_selection::<Clipboard>() {
              xstate.set_clipboard(sel);
          }
+@@ -257,3 +271,22 @@ pub fn main(mut data: impl RunData) -> Option<()> {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod command_tests {
++    use super::*;
++
++    #[test]
++    fn xwayland_does_not_inherit_satellites_wayland_socket() {
++        let mut command = Command::new("Xwayland");
++        command.env("WAYLAND_SOCKET", "80");
++        configure_xwayland_display(&mut command, std::ffi::OsStr::new("xwls-1"));
++
++        let env: std::collections::HashMap<_, _> = command.get_envs().collect();
++        assert_eq!(env.get(std::ffi::OsStr::new("WAYLAND_SOCKET")), Some(&None));
++        assert_eq!(
++            env.get(std::ffi::OsStr::new("WAYLAND_DISPLAY")),
++            Some(&Some(std::ffi::OsStr::new("xwls-1")))
++        );
++    }
++}
 diff --git a/src/server/clientside.rs b/src/server/clientside.rs
 index 664c909..910f958 100644
 --- a/src/server/clientside.rs

@@ -16,6 +16,9 @@ with `niri-xwayland-dnd-fix` for X11 -> Wayland support.
   only when the pointer is over a native Wayland surface.
 - Clipboard: the normal upstream clipboard and primary-selection ownership
   paths are retained. DND sources have separate event and lifetime state.
+- Process isolation: `WAYLAND_SOCKET` used to connect satellite to niri is
+  explicitly removed before spawning Xwayland, which must connect to
+  satellite's private `xwls-*` display instead.
 
 The code is based on the XDND protocol and uses KWin only as a behavioral
 reference; no KWin source is copied.
