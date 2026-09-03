@@ -1,0 +1,77 @@
+--- a/src/xstate/selection.rs
++++ b/src/xstate/selection.rs
+@@ -4,7 +4,7 @@
+ use log::{debug, error, warn};
+ use rustix::event::{PollFd, PollFlags, poll};
+ use smithay_client_toolkit::data_device_manager::WritePipe;
+-use std::cell::RefCell;
++use std::cell::{Cell, RefCell};
+ use std::collections::VecDeque;
+ use std::io::{Error, ErrorKind, Result, Write};
+ use std::rc::Rc;
+@@ -32,7 +32,8 @@
+     window: x::Window,
+     pending: RefCell<VecDeque<PendingSelectionData>>,
+     selection: x::Atom,
+-    selection_time: u32,
++    selection_time: Cell<u32>,
++    ready: Cell<bool>,
+     incr: x::Atom,
+ }
+ 
+@@ -59,7 +60,7 @@
+                 incr: false,
+                 active: false,
+             });
+-            if self.pending.borrow().len() == 1 {
++            if self.ready.get() && self.pending.borrow().len() == 1 {
+                 self.next_conversion();
+             }
+         } else {
+@@ -104,9 +105,19 @@
+             window,
+             pending: RefCell::default(),
+             selection,
+-            selection_time,
++            selection_time: Cell::new(selection_time),
++            ready: Cell::new(false),
+             incr,
+         })
+     }
+ 
++    /// XdndSelection owners are allowed to delay serving their data until they
++    /// have sent XdndDrop. Keep Wayland readers queued until that point.
++    pub(crate) fn release_for_drop(&self, timestamp: u32) {
++        self.selection_time.set(timestamp);
++        if !self.ready.replace(true) && !self.pending.borrow().is_empty() {
++            self.next_conversion();
++        }
++    }
++
+     /// Finish handling the current pending selection (if any) and queue the next one (if any).
+@@ -131,5 +142,5 @@
+                     selection: self.selection,
+                     target: psd.target,
+                     property: psd.property,
+-                    time: self.selection_time,
++                    time: self.selection_time.get(),
+                 })
+@@ -545,6 +556,7 @@
+             window: target_window,
+             pending: RefCell::default(),
+             selection: self.atom,
+-            selection_time: self.last_selection_timestamp,
++            selection_time: Cell::new(self.last_selection_timestamp),
++            ready: Cell::new(true),
+             incr: atoms.incr,
+         });
+--- a/src/xstate/dnd.rs
++++ b/src/xstate/dnd.rs
+@@ -345,6 +345,7 @@
+                 .filter(|dnd| dnd.source.resource_id() == data[0])
+             {
+                 dnd.dropped_on_x = true;
++                dnd.selection.release_for_drop(data[2]);
+             }
+             return true;
+         }

@@ -1,7 +1,7 @@
 pkgbase = xwayland-satellite-dnd-fix
 	pkgdesc = xwayland-satellite main branch with bidirectional Wayland/X11 XDND
 	pkgver = 0.8.2.r9.g78e4e01
-	pkgrel = 8
+	pkgrel = 11
 	url = https://github.com/Supreeeme/xwayland-satellite
 	arch = x86_64
 	license = MPL-2.0
@@ -18,7 +18,9 @@ pkgbase = xwayland-satellite-dnd-fix
 	conflicts = xwayland-satellite
 	source = xwayland-satellite::git+https://github.com/Supreeeme/xwayland-satellite.git
 	source = 0001-bidirectional-xdnd.patch
+	source = 0003-defer-xdnd-selection-until-drop.patch
 	sha256sums = SKIP
 	sha256sums = 1c0d02c87b2b408c334bd7aa5d7247a29d752e25a0cad0c9c1281be73d041990
+	sha256sums = f16cbeb148e0dc47bfe84efd5b07f51374e4901697f85ab714d4cfdf7741c2fb
 
 pkgname = xwayland-satellite-dnd-fix

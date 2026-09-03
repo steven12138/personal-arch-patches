@@ -2,7 +2,7 @@
 
 pkgname=xwayland-satellite-dnd-fix
 pkgver=0.8.2.r9.g78e4e01
-pkgrel=8
+pkgrel=11
 pkgdesc='xwayland-satellite main branch with bidirectional Wayland/X11 XDND'
 arch=('x86_64')
 url='https://github.com/Supreeeme/xwayland-satellite'
@@ -14,10 +14,12 @@ conflicts=('xwayland-satellite')
 source=(
   'xwayland-satellite::git+https://github.com/Supreeeme/xwayland-satellite.git'
   '0001-bidirectional-xdnd.patch'
+  '0003-defer-xdnd-selection-until-drop.patch'
 )
 sha256sums=(
   'SKIP'
   '1c0d02c87b2b408c334bd7aa5d7247a29d752e25a0cad0c9c1281be73d041990'
+  'f16cbeb148e0dc47bfe84efd5b07f51374e4901697f85ab714d4cfdf7741c2fb'
 )
 
 pkgver() {
@@ -29,6 +31,7 @@ pkgver() {
 prepare() {
   cd xwayland-satellite
   patch -Np1 -i "${srcdir}/0001-bidirectional-xdnd.patch"
+  patch -Np1 -i "${srcdir}/0003-defer-xdnd-selection-until-drop.patch"
   sed -i 's|ExecStart=/usr/local/bin/|ExecStart=/usr/bin/|' resources/xwayland-satellite.service
 }
 
